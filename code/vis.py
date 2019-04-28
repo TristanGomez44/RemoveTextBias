@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import sys
 import torch
-from torch.optim import SGD
+
 from torchvision import models
 from torchvision import datasets, transforms
 
@@ -25,6 +25,10 @@ from torch.autograd import Variable
 import netBuilder
 from skimage.transform import resize
 from matplotlib.mlab import PCA
+import dataLoader
+from args import ArgReader
+
+import random
 
 #Look for the most important pixels in the activation value using mask
 def salMap_mask(image,model,imgInd, maskSize=(1,1)):
@@ -76,31 +80,40 @@ def salMap_der(image,model,imgInd):
 
     writeImg("../vis/salMapDer_img_{}_u{}.png".format(imgInd,argMaxpred),salMap.numpy()[0,0])
 
-def opt(image,model,imgInd, layInd, unitInd, epoch=10000, nbPrint=4, alpha=6, beta=2,
-        C=20, B=2, stopThre = 0.1):
+def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alpha=6, beta=2,
+        C=20, B=2, stopThre = 0.00005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv"):
     print("Maximizing activation")
 
     model.eval()
     Bp = 2*B
     V=B/2
-    optimizer = SGD([image], lr=0.05)
 
-    i=1
+    if optimType=="SGD":
+        optimizer = optim.SGD([image], lr=lr,momentum=momentum,nesterov=True)
+    else:
+        optimizer = optim.LBFGS([image],lr=lr)
+
+    i=0
     lastVar = stopThre
     last_img = np.copy(image.detach().numpy())
+
     while i<epoch and lastVar >= stopThre:
 
     #for i in range(1, epoch+1):
         optimizer.zero_grad()
 
-        _,activArr = model(image)
+        output,actArr = model(image)
+
+        if layToOpti == "conv":
+            act = actArr[-2][0,unitInd].mean()
+        elif layToOpti == "logit":
+            act = output[0,unitInd]
 
         # Loss function is minus the mean of the output of the selected layer/filter
-        act = -torch.mean(activArr[layInd][0][unitInd])
 
         # computing the norm : +infinity if one pixel is above the limit,
         # else, computing a soft-constraint, the alpha norm (raised to the alpha power)
-        if image.detach().numpy()[0,0].any() > Bp:
+        if image.detach().numpy()[0,:].any() > Bp:
             norm = torch.tensor(float("inf"))
         else:
             norm = torch.sum(torch.pow(image,alpha))/float(image.size()[2]*image.size()[3]*np.power(B,alpha))
@@ -112,21 +125,38 @@ def opt(image,model,imgInd, layInd, unitInd, epoch=10000, nbPrint=4, alpha=6, be
         w_tv = torch.pow((image[:,:,1:,1:]-image[:,:,:h_x-1,:w_x-1]),2)
         tv =  torch.pow(h_tv+w_tv,beta/2).sum()/(h_x*w_x*np.power(V,beta))
 
-        loss = C*act+norm+tv
-
+        loss = -C*act+norm+tv
         # Backward
-        loss.backward()
-        # Update image
-        optimizer.step()
+        loss.backward(retain_graph=True)
 
-        if i % int(epoch/(nbPrint-1)) == 0:
-            np_img = np.copy(image.detach().numpy())
-            lastVar = np.power(last_img - np_img,2).sum()/np.power(last_img,2).sum()
-            last_img = np.copy(image.detach().numpy())
+        if optimType== 'LBFGS':
+            def closure():
+                optimizer.zero_grad()
+                output = model(image)
+                loss = -C*act+norm+tv
+                loss.backward(retain_graph=True)
+                return loss
+
+            # Update image
+            optimizer.step(closure)
+        else:
+            # Update image
+            optimizer.step()
+
+        np_img = np.copy(image.detach().numpy())
+        lastVar = np.sqrt(np.power(last_img - np_img,2).sum())
+        last_img = np.copy(image.detach().numpy())
+
+
+        if i % nbPrint == 0:
             # Save image
-            print('Iteration:', str(i), 'Loss:', "{0:.2f}".format(loss.data.numpy()))
-            writeImg('../vis/img_'+str(imgInd)+'layer_vis_l' + str(layInd) +'_u' + str(unitInd) + '_iter'+str(i)+'.jpg',image.detach().numpy()[0,0])
+            print('Iteration:', str(i), 'Loss:', loss.data.numpy(),"Travelled distance",lastVar)
+            writeImg('../vis/{}/img{}_model{}_'.format(exp_id,imgInd,model_id)+'_u' + str(unitInd) + '_iter'+str(i)+'.jpg',image.detach().numpy()[0,:])
+
         i += 1
+        #print(i,epoch,i<epoch,lastVar,stopThre,lastVar >= stopThre)
+
+    writeImg('../vis/{}/img{}_model{}_'.format(exp_id,imgInd,model_id)+'_u' + str(unitInd) + '_iter'+str(i)+'.jpg',image.detach().numpy()[0,:])
 
 def writeImg(path,img):
 
@@ -134,67 +164,85 @@ def writeImg(path,img):
 
     np_img = (255*np_img/np_img.max()).astype('int')
     #print(np_img)
-    np_img = resize(np_img,(300,300),mode="constant", order=0)
+    np_img = resize(np_img,(np_img.shape[0],300,300),mode="constant", order=0,anti_aliasing=True)
 
     np_img = np_img+np.abs(np_img.min())
     np_img = (255*np_img/np_img.max()).astype('int')
 
+    np_img = np.transpose(np_img, (1, 2, 0))
+
     cv2.imwrite(path,np_img)
 
-def getContr(task):
-    if task == "ClustDetectNet":
-        return netBuilder.ClustDetectNet
-    elif task == "Net":
-        return netBuilder.Net
-    elif task == "OneClNet":
-        return netBuilder.OneClNet
-    else:
-        print("Unknown net type : {}. Returning None".format(modelType))
-        return None
+def main(argv=None):
 
-def main():
+    #Getting arguments from config file and command line
+    #Building the arg reader
+    argreader = ArgReader(argv)
 
-    if len(sys.argv) != 6:
-        print("Usage : vis.py <pathToModel> <modelType> <nbImages> <layInd> <unitInd>")
-        sys.exit(0)
+    argreader.parser.add_argument('--max_act', type=str,nargs=4, metavar='NOISE',
+                        help='To visualise an image that maximise the activation of one unit in the last layer. \
+                        The values are :\
+                            the path to the model, \
+                            the number of image to be created, \
+                            the layer to optimise. Can be \'conv\' or \'dense\' \
+                            the unit to optimise. If not indicated, the unit number i will be optimised if image has label number i.')
 
-    modelPath = sys.argv[1]
-    task = sys.argv[2]
-    nbImages = int(sys.argv[3])
-    layInd = int(sys.argv[4])
-    unitInd = int(sys.argv[5])
+    #Reading the comand line arg
+    argreader.getRemainingArgs()
 
-    model = getContr(task)(inputSize=28,nbCl=5,inputChan=1)
-    model.load_state_dict(torch.load(modelPath))
+    #Getting the args from command line and config file
+    args = argreader.args
+    args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-    print("ClustWeight")
-    for p in model.getClustWeights():
-        print(p)
+    #The folders where the experience file will be written
+    if not (os.path.exists("../vis/{}".format(args.exp_id))):
+        os.makedirs("../vis/{}".format(args.exp_id))
 
-    print("DetectWeight")
-    for p in model.getDetectWeights():
-        print(p)
+    if args.max_act:
 
-    #Loading the test set
-    kwargs = {}
-    test_loader = torch.utils.data.DataLoader(datasets.MNIST('../data/MNIST', train=False, transform=transforms.Compose([
-                           transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,))])),
-        batch_size=1, shuffle=True, **kwargs)
+        modelPath = args.max_act[0]
+        nbImages = int(args.max_act[1])
+        layToOpti = args.max_act[2]
+        unitInd = int(args.max_act[3])
 
-    #Comouting image that maximises activation of the given unit in the given layer
-    maxInd = len(test_loader.dataset) - 1
-    i = 0
-    model.eval()
-    while i < nbImages:
-        print("Image ",i)
+        random.seed(args.seed)
 
-        img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
+        #Building the net
+        model = netBuilder.netMaker(args)
+        model.load_state_dict(torch.load(modelPath))
 
-        writeImg('../vis/img_'+str(i)+'.jpg',test_loader.dataset[i][0][0].detach().numpy())
+        _,test_loader = dataLoader.loadData(args.dataset,args.batch_size,1,args.cuda,args.num_workers)
 
-        img.requires_grad = True
+        #Comouting image that maximises activation of the given unit in the given layer
+        maxInd = len(test_loader.dataset) - 1
 
-        opt(img,model,i,layInd,unitInd)
-        #salMap_der(img,model,i)
-        #salMap_mask(img,model,i)
-        i +=1
+        model.eval()
+
+        for i,(image,label) in enumerate(test_loader):
+
+            print("Image ",i)
+
+            img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
+
+            #if img.size(1) != 3:
+            #    img = img.expand((img.size(0),3,img.size(2),img.size(3)))
+
+            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image[0,:].detach().numpy())
+
+            img.requires_grad = True
+
+            #if unitInd is None:
+            #    unitInd = label.item()
+
+            opt(img,model,args.exp_id,args.ind_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
+                epoch=args.epochs,nbPrint=args.log_interval)
+
+            #salMap_der(img,model,i)
+            #salMap_mask(img,model,i)
+
+            if i == nbImages-1:
+                break
+
+
+if __name__ == "__main__":
+    main()
