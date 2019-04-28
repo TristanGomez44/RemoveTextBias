@@ -82,14 +82,15 @@ class ArgReader():
                             help='input batch size for testing')
         self.parser.add_argument('--epochs', type=int, metavar='N',
                             help='number of epochs to train')
-        self.parser.add_argument('--lr', type=str2FloatList, nargs='+',metavar='LR',
-                            help='learning rate (it can be a schedule : --lr 0.01 0.001 0.0001)')
-        self.parser.add_argument('--lr_cl', type=str2FloatList, nargs='+',metavar='LR_CLUST',
-                            help='learning rate of the clust net (it can be a schedule : --lr 0.01 0.001 0.0001)')
+        self.parser.add_argument('--lr', type=float,metavar='LR',
+                            help='learning rate')
         self.parser.add_argument('--num_workers', type=int,metavar='NUMWORKERS',
                             help='the number of processes to load the data. num_workers equal 0 means that it’s \
                             the main process that will do the data loading when needed, num_workers equal 1 is\
                             the same as any n, but you’ll only have a single worker, so it might be slow')
+
+        self.parser.add_argument('--modeltype', type=str, metavar='M',
+                            help='The model type. Can be \'resnet\' or \'cnn\'.')
 
         self.parser.add_argument('--momentum', type=float, metavar='M',
                             help='SGD momentum')
@@ -130,6 +131,12 @@ class ArgReader():
                             help='the number of dense layers for the dectecting nets')
         self.parser.add_argument('--desize_denselayers', type=int, metavar='N',
                             help='the size of dense layers for the detecting nets')
+
+        self.parser.add_argument('--dense_activation', type=str, metavar='N',
+                            help='The activation function to use for the dense layers. Can be \'ReLU\' or \'Gaussian\'')
+
+        self.parser.add_argument('--conv_activation', type=str, metavar='N',
+                            help='The activation function to use for the convolutional layers. Can be \'ReLU\' or \'Gaussian\'')
 
         self.args = None
 
