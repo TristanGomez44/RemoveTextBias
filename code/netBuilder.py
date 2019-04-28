@@ -8,6 +8,21 @@ from torch.autograd import Variable
 from torch.distributions.categorical import Categorical
 import numpy as np
 
+import resnet
+
+class Triang(nn.Module):
+    def __init__(self):
+        super(Triang,self).__init__()
+    def forward(self,x):
+        return (1+x)*((-1<x)*(x<=0)).float() + (1-x)*((0<x)*(x<=1)).float()
+
+class Relu(nn.Module):
+    def __init__(self):
+        super(Relu,self).__init__()
+    def forward(self,x):
+        return F.relu(x)
+
+
 class BasicConv2d(nn.Module):
     """A basic 2D convolution layer
 
@@ -18,7 +33,7 @@ class BasicConv2d(nn.Module):
     Consulted : 19/11/2018
 
     """
-    def __init__(self, in_channels, out_channels,use_bn=True, **kwargs):
+    def __init__(self, in_channels, out_channels,use_bn=True,activation=Relu, **kwargs):
 
         '''
         Args:
@@ -33,13 +48,14 @@ class BasicConv2d(nn.Module):
         self.use_bn = use_bn
         if self.use_bn:
             self.bn = nn.BatchNorm2d(out_channels)
+        self.activation = activation
 
     def forward(self, x):
         x = self.conv(x)
         if self.use_bn:
             x = self.bn(x)
 
-        return F.relu(x, inplace=True)
+        return self.activation(x)
 
 class ConvFeatExtractor(nn.Module):
     """A convolutional feature extractor
@@ -49,7 +65,7 @@ class ConvFeatExtractor(nn.Module):
 
     """
 
-    def __init__(self,inChan,chan,nbLay,ker,maxPl1,maxPl2,applyDropout2D,outChan=None):
+    def __init__(self,inChan,chan,nbLay,ker,maxPl1,maxPl2,applyDropout2D,outChan=None,activation=Relu):
         '''
         Args:
             inChan (int): the number of input channel
@@ -83,16 +99,16 @@ class ConvFeatExtractor(nn.Module):
 
         self.applyDropout2D = applyDropout2D
 
-        self.convs = nn.ModuleList([BasicConv2d(inChan, chan,kernel_size=self.ker)])
+        self.convs = nn.ModuleList([BasicConv2d(inChan, chan,kernel_size=self.ker,activation=activation)])
 
         self.padd = nn.ZeroPad2d(self.computePaddingSize(self.ker))
 
         if self.nbLay > 2:
 
             #Padding is applied on every layer so that the feature map size stays the same at every layer
-            self.convs.extend([BasicConv2d(chan,chan,kernel_size=self.ker) for i in range(self.nbLay-2)])
+            self.convs.extend([BasicConv2d(chan,chan,kernel_size=self.ker,activation=activation) for i in range(self.nbLay-2)])
 
-        self.convs.append(BasicConv2d(chan, outChan,kernel_size=self.ker))
+        self.convs.append(BasicConv2d(chan, outChan,kernel_size=self.ker,activation=activation))
 
         self.drop2DLayer = nn.Dropout2d()
 
@@ -152,7 +168,8 @@ class ConvFeatExtractor(nn.Module):
 class CNN(nn.Module):
     """A CNN module"""
 
-    def __init__(self,inSize,inChan,chan,avPool,nbLay,ker,maxPl1,maxPl2,applyDropout2D,nbDenseLay,sizeDenseLay,nbOut,applyLogSoftmax=True,outChan=None):
+    def __init__(self,inSize,inChan,chan,avPool,nbLay,ker,maxPl1,maxPl2,applyDropout2D,nbDenseLay,sizeDenseLay,nbOut,applyLogSoftmax=True,\
+                outChan=None,convActivation='ReLU',denseActivation='ReLU'):
         """
         Args:
             nbOut (int): the number of output at the last dense layer
@@ -165,14 +182,28 @@ class CNN(nn.Module):
 
         super(CNN,self).__init__()
 
+        if convActivation == "ReLU":
+            convActivationFunc = Relu()
+        elif convActivation == "triang":
+            convActivationFunc = Triang()
+        else:
+            raise ValueError("Unknown activation function for the conv layers : {}".format(convActivation))
+
         self.avPool = avPool
         if nbLay != 0:
             self.convFeat = ConvFeatExtractor(inChan=inChan,chan=chan,outChan=outChan,nbLay=nbLay,\
-                                              ker=ker,maxPl1=maxPl1,maxPl2=maxPl2,applyDropout2D=applyDropout2D)
+                                              ker=ker,maxPl1=maxPl1,maxPl2=maxPl2,applyDropout2D=applyDropout2D,activation=convActivationFunc)
         else:
             self.convFeat = None
 
         self.applyLogSoftmax = applyLogSoftmax
+
+        if denseActivation == "ReLU":
+            self.activation = Relu
+        elif denseActivation == "triang":
+            self.activation = Triang
+        else:
+            raise ValueError("Unknown activation function for the dense layers : {}".format(denseActivation))
 
         if nbDenseLay == 1:
 
@@ -205,22 +236,24 @@ class CNN(nn.Module):
                 InputConv2Size = int((inSize-(ker-1))/maxPl1)
                 InputLinearSize = int((InputConv2Size-(ker-1))/maxPl2)
 
-                self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize*InputLinearSize*outChan,sizeDenseLay),nn.ReLU()])
+                self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize*InputLinearSize*outChan,sizeDenseLay),self.activation])
             else:
 
                 InputLinearSize = inSize
                 #If the input has 0 channel it indicates it is a vector and not an matrix representation of the input
 
                 if inChan==0:
-                    self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize,sizeDenseLay),nn.ReLU()])
+                    self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize,sizeDenseLay),self.activation])
                 else:
-                    self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize*InputLinearSize*inChan,sizeDenseLay),nn.ReLU()])
+                    self.denseLayers = nn.ModuleList([nn.Linear(InputLinearSize*InputLinearSize*inChan,sizeDenseLay),self.activation])
 
             for i in range(nbDenseLay-2):
-                self.denseLayers.extend([nn.Linear(sizeDenseLay,sizeDenseLay),nn.ReLU()])
+                self.denseLayers.extend([nn.Linear(sizeDenseLay,sizeDenseLay),self.activation])
 
             self.denseLayers.append(nn.Linear(sizeDenseLay,nbOut))
             self.denseLayers = nn.Sequential(*self.denseLayers)
+
+
     def forward(self,x):
         '''Computes the output of the CNN
 
@@ -248,7 +281,7 @@ class CNN(nn.Module):
             if self.applyLogSoftmax:
                 x = F.log_softmax(x, dim=1)
 
-        return x, actArr
+        return x,actArr
 
     def setWeights(self,params,cuda,noise_init):
         '''Set the weight of the extractor
@@ -287,6 +320,28 @@ class CNN(nn.Module):
             #else:
             #    print("Cannot find parameters {}".format(newKey))
 
+class ResNetBased(nn.Module):
+
+    def __init__(self,resnet,resnetLayNb,layCut):
+
+        super(ResNetBased,self).__init__()
+        self.resnet = resnet
+
+        if resnetLayNb == 50:
+            baseFeatNb = 256
+        elif resnetLayNb == 18:
+            baseFeatNb = 64
+
+        nbFeat = baseFeatNb*2**(layCut-1)
+
+        self.dense = nn.Linear(nbFeat,10)
+
+    def forward(self,x):
+
+        x = self.resnet(x)
+        x = self.dense(x)
+
+        return x
 
 def netMaker(args):
     '''Build a network
@@ -300,27 +355,36 @@ def netMaker(args):
     if args.dataset == "MNIST":
         inSize = 28
         inChan = 1
+        nbOut = 10
     elif args.dataset == "CIFAR10":
         inSize = 32
         inChan = 3
+        nbOut = 10
+    elif args.dataset == "FAKE":
+        inSize = 28
+        inChan = 3
+        nbOut = 10
+    elif args.dataset == "FAKENET":
+        inSize = 256
+        inChan = 3
+        nbOut = 1000
+    elif args.dataset == "FAKENIST":
+        inSize = 100
+        inChan = 1
+        nbOut = 10
+    elif args.dataset == "IMAGENET":
+        inSize = 224
+        inChan = 3
+        nbOut = 1000
     else:
         raise("netMaker: Unknown Dataset")
 
-    #During training a clustering-detecting network is built
-    if not args.pretrain:
+    if args.modeltype=="cnn":
 
-        if not args.pretrain_cae:
-            if args.full_clust:
-                net = FullClustDetectNet(inSize=inSize,inChan=inChan,args=args)
-            else:
-                net = ClustDetectNet(inSize=inSize,inChan=inChan,args=args)
-        else:
-            net = CAE(inSize=inSize,inChan=inChan,chan=args.encchan,hidd_repr_size=args.enchidd_repr_size,nbLay=args.encnblay,\
-                      ker=args.encker,maxPl1=args.encmaxpl1,maxPl2=args.encmaxpl2,applyDropout2D=args.encdrop)
-    #During pretraining a cnn is built
-    else:
         net = CNN(inSize=inSize,inChan=inChan,chan=args.dechan,avPool=args.avpool,nbLay=args.denblayers,\
-                  ker=args.deker,maxPl1=args.demaxpoolsize,maxPl2=args.demaxpoolsize_out,applyDropout2D=args.dedrop,nbOut=2,\
-                  applyLogSoftmax=True,nbDenseLay=args.denb_denselayers,sizeDenseLay=args.desize_denselayers)
+              ker=args.deker,maxPl1=args.demaxpoolsize,maxPl2=args.demaxpoolsize_out,applyDropout2D=args.dedrop,nbOut=nbOut,\
+              applyLogSoftmax=False,nbDenseLay=args.denb_denselayers,sizeDenseLay=args.desize_denselayers,denseActivation=args.dense_activation,convActivation=args.conv_activation)
+    else:
+        net = resnet.resnet18(pretrained=True,layCut=4,activation=args.conv_activation)
 
     return net
