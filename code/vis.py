@@ -81,7 +81,7 @@ def salMap_der(image,model,imgInd):
     writeImg("../vis/salMapDer_img_{}_u{}.png".format(imgInd,argMaxpred),salMap.numpy()[0,0])
 
 def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alpha=6, beta=2,
-        C=20, B=2, stopThre = 0.00005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv"):
+        C=20, B=2, stopThre = 0.000005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv"):
     print("Maximizing activation")
 
     model.eval()
@@ -187,6 +187,9 @@ def main(argv=None):
                             the layer to optimise. Can be \'conv\' or \'dense\' \
                             the unit to optimise. If not indicated, the unit number i will be optimised if image has label number i.')
 
+    argreader.parser.add_argument('--stop_thres', type=float, default=0.000005,metavar='NOISE',
+                        help='If the distance travelled by parameters during activation maximisation become lesser than this parameter, the optimisation stops.')
+
     #Reading the comand line arg
     argreader.getRemainingArgs()
 
@@ -235,7 +238,7 @@ def main(argv=None):
             #    unitInd = label.item()
 
             opt(img,model,args.exp_id,args.ind_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
-                epoch=args.epochs,nbPrint=args.log_interval)
+                epoch=args.epochs,nbPrint=args.log_interval,stopThre=args.stop_thres)
 
             #salMap_der(img,model,i)
             #salMap_mask(img,model,i)
