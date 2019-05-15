@@ -29,12 +29,17 @@ def trainDetect(model,optimizer,train_loader, epoch, args):
         train_loader (torch.utils.data.DataLoader): the loader to generate batches of train images
         epoch (int): the current epoch number
         args (Namespace): the namespace containing all the arguments required for training and building the network
-        classToFind (list): the list of class index to detect
+
     '''
 
     model.train()
     correct = 0
     for batch_idx, (data, target) in enumerate(train_loader):
+
+        if data.size(1) ==1:
+            data = data.expand(data.size(0),data.size(1)*3,data.size(2),data.size(3))
+
+        print(data.size())
 
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -57,6 +62,9 @@ def trainDetect(model,optimizer,train_loader, epoch, args):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.data.item()))
 
+        if batch_idx > 3 and args.debug:
+            break
+
     print("Accuracy :{}%".format(100. * correct / ((batch_idx+1)*args.batch_size)))
 
     torch.save(model.state_dict(), "../nets/{}/model{}_epoch{}".format(args.exp_id,args.ind_id, epoch))
@@ -70,7 +78,7 @@ def testDetect(model,test_loader,epoch, args):
         test_loader (torch.utils.data.DataLoader): the loader to generate batches of test images
         epoch (int): the current epoch number
         args (Namespace): the namespace containing all the arguments required for training and building the network
-        classToFind (list): the list of class index to detect
+
     '''
 
     model.eval()
@@ -82,6 +90,9 @@ def testDetect(model,test_loader,epoch, args):
     firstTestBatch = True
 
     for batch_idx,(data, target) in enumerate(test_loader):
+
+        if data.size(1) ==1:
+            data = data.expand(x.size(0),x.size(1)*3,x.size(2),x.size(3))
 
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -212,12 +223,6 @@ def main(argv=None):
 
     train_loader,test_loader = dataLoader.loadData(args.dataset,args.batch_size,args.test_batch_size,args.cuda,args.num_workers)
 
-    #The group of class to detect
-    np.random.seed(args.seed)
-    classes = [0,1,2,3,4,5,6,7,8,9]
-    np.random.shuffle(classes)
-    classToFind =  classes[0: args.clust]
-
     #The folders where the experience file will be written
     if not (os.path.exists("../vis/{}".format(args.exp_id))):
         os.makedirs("../vis/{}".format(args.exp_id))
@@ -239,8 +244,6 @@ def main(argv=None):
 
     startEpoch = initialize_Net_And_EpochNumber(net,args.init,args.exp_id,args.ind_id,args.cuda,netType)
 
-    net.classToFind = classToFind
-
     #Getting the contructor and the kwargs for the choosen optimizer
     optimConst,kwargs = get_OptimConstructor_And_Kwargs(args.optim,args.momentum)
 
@@ -249,9 +252,6 @@ def main(argv=None):
     #Converting it to a list with one element makes the rest of processing easier
     if type(args.lr) is float:
         args.lr = [args.lr]
-
-    if type(args.lr_cl) is float:
-        args.lr_cl = [args.lr_cl]
 
     #Train and evaluate the clustering detecting network for several epochs
     lrCounter = 0

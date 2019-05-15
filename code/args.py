@@ -138,6 +138,10 @@ class ArgReader():
         self.parser.add_argument('--conv_activation', type=str, metavar='N',
                             help='The activation function to use for the convolutional layers. Can be \'ReLU\' or \'Gaussian\'')
 
+        self.parser.add_argument('--debug', type=str2bool, metavar='N',
+                            help='To run only a few batch of training')
+
+
         self.args = None
 
     def getRemainingArgs(self):
