@@ -1,10 +1,11 @@
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
-
+import torch.nn.functional as F
 import netBuilder
+import sys
+import torch
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d']
-
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -14,23 +15,33 @@ model_urls = {
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
 
-
 def conv3x3(in_planes, out_planes, stride=1, groups=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, groups=groups, bias=False)
 
-
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
+class GeoTrans(nn.Module):
+
+    def __init__(self):
+        super(GeoTrans, self).__init__()
+        self.params = nn.Parameter(torch.tensor([[1,0,0],[0,1,0]]).float())
+
+    def forward(self,x):
+
+        grid = F.affine_grid(self.params.unsqueeze(0).expand(x.size(0),2,3), x.size())
+        x = F.grid_sample(x, grid)
+
+        return x
 
 class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, norm_layer=None,activation="ReLU"):
+                 base_width=64, norm_layer=None,geom=False):
         super(BasicBlock, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -40,14 +51,16 @@ class BasicBlock(nn.Module):
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
 
-        if activation == "ReLU":
-            self.relu = nn.ReLU(inplace=True)
-        elif activation == "Triang":
-            self.relu = netBuilder.Triang()
-        else:
-            raise ValueError("Unkown activation function : {}".format(activation))
+        self.relu = nn.ReLU(inplace=True)
 
         self.conv2 = conv3x3(planes, planes)
+
+        self.geom = geom
+        if geom:
+            self.geomTrans = GeoTrans()
+        else:
+            self.geomTrans = None
+
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
         self.stride = stride
@@ -61,6 +74,9 @@ class BasicBlock(nn.Module):
 
         out = self.conv2(out)
         out = self.bn2(out)
+
+        if self.geom:
+            out = self.geomTrans(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -112,11 +128,10 @@ class Bottleneck(nn.Module):
 
         return out
 
-
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
-                 groups=1, width_per_group=64, norm_layer=None,layCut=4,activation='ReLU'):
+                 groups=1, width_per_group=64, norm_layer=None,geom=False):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -129,14 +144,12 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0], norm_layer=norm_layer,activation=activation)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, norm_layer=norm_layer,activation=activation)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, norm_layer=norm_layer,activation=activation)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, norm_layer=norm_layer,activation=activation)
+        self.layer1 = self._make_layer(block, 64,  layers[0], stride=1, norm_layer=norm_layer,geom=geom)
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, norm_layer=norm_layer,geom=geom)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, norm_layer=norm_layer,geom=geom)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, norm_layer=norm_layer,geom=geom)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
-
-        self.layCut = layCut
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -155,7 +168,7 @@ class ResNet(nn.Module):
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
 
-    def _make_layer(self, block, planes, blocks, stride=1, norm_layer=None,activation="ReLU"):
+    def _make_layer(self, block, planes, blocks, stride=1, norm_layer=None,geom=False):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         downsample = None
@@ -167,11 +180,11 @@ class ResNet(nn.Module):
 
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, norm_layer,activation))
+                            self.base_width, norm_layer))
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
             layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, norm_layer=norm_layer))
+                                base_width=self.base_width, norm_layer=norm_layer,geom=geom))
 
         return nn.Sequential(*layers)
 
@@ -182,30 +195,15 @@ class ResNet(nn.Module):
         x = self.maxpool(x)
 
         x = self.layer1(x)
-        if self.layCut == 1:
-            x = self.avgpool(x)
-            x = x.view(x.size(0), -1)
-            return x
-
         x = self.layer2(x)
-        if self.layCut == 2:
-            x = self.avgpool(x)
-            x = x.view(x.size(0), -1)
-            return x
-
         x = self.layer3(x)
-        if self.layCut == 3:
-            x = self.avgpool(x)
-            x = x.view(x.size(0), -1)
-            return x
-
         x = self.layer4(x)
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
 
-        return x,None
+        return x
 
 
 def resnet18(pretrained=False, **kwargs):
