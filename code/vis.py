@@ -81,7 +81,7 @@ def salMap_der(image,model,imgInd):
     writeImg("../vis/salMapDer_img_{}_u{}.png".format(imgInd,argMaxpred),salMap.numpy()[0,0])
 
 def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alpha=6, beta=2,
-        C=20, B=2, stopThre = 0.000005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv"):
+        C=20, B=2, stopThre = 0.000005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv",reg_weight=0):
     print("Maximizing activation")
 
     model.eval()
@@ -125,7 +125,8 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
         w_tv = torch.pow((image[:,:,1:,1:]-image[:,:,:h_x-1,:w_x-1]),2)
         tv =  torch.pow(h_tv+w_tv,beta/2).sum()/(h_x*w_x*np.power(V,beta))
 
-        loss = -C*act+norm+tv
+        loss = -C*act+reg_weight*(norm+tv)
+
         # Backward
         loss.backward(retain_graph=True)
 
@@ -133,7 +134,7 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
             def closure():
                 optimizer.zero_grad()
                 output = model(image)
-                loss = -C*act+norm+tv
+                loss = -C*act+reg_weight*(norm+tv)
                 loss.backward(retain_graph=True)
                 return loss
 
@@ -190,6 +191,9 @@ def main(argv=None):
     argreader.parser.add_argument('--stop_thres', type=float, default=0.000005,metavar='NOISE',
                         help='If the distance travelled by parameters during activation maximisation become lesser than this parameter, the optimisation stops.')
 
+    argreader.parser.add_argument('--reg_weight', type=float, default=0,metavar='NOISE',
+                        help='The weight of the regularisation during activation maximisation.')
+
     #Reading the comand line arg
     argreader.getRemainingArgs()
 
@@ -238,7 +242,7 @@ def main(argv=None):
             #    unitInd = label.item()
 
             opt(img,model,args.exp_id,args.ind_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
-                epoch=args.epochs,nbPrint=args.log_interval,stopThre=args.stop_thres)
+                epoch=args.epochs,nbPrint=args.log_interval,stopThre=args.stop_thres,reg_weight=args.reg_weight)
 
             #salMap_der(img,model,i)
             #salMap_mask(img,model,i)
