@@ -89,6 +89,9 @@ class ArgReader():
                             the main process that will do the data loading when needed, num_workers equal 1 is\
                             the same as any n, but you’ll only have a single worker, so it might be slow')
 
+        self.parser.add_argument('--geom', type=str2bool,metavar='NOCUDA',
+                            help='To add geometric layers')
+
         self.parser.add_argument('--modeltype', type=str, metavar='M',
                             help='The model type. Can be \'resnet\' or \'cnn\'.')
 
