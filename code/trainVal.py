@@ -15,9 +15,12 @@ import configparser
 import torch.nn.functional as F
 import vis
 from torch.distributions import Bernoulli
+from tensorboardX import SummaryWriter
 
 
-def trainDetect(model,optimizer,train_loader, epoch, args):
+from PIL import Image
+
+def trainDetect(model,optimizer,train_loader, epoch, writer,args):
     '''Train a detecting network
 
     After having run the net on every image of the train set,
@@ -33,13 +36,10 @@ def trainDetect(model,optimizer,train_loader, epoch, args):
     '''
 
     model.train()
-    correct = 0
+    print("Train epoch : ",epoch)
+    total_loss = 0
+    total_acc = 0
     for batch_idx, (data, target) in enumerate(train_loader):
-
-        if data.size(1) ==1:
-            data = data.expand(data.size(0),data.size(1)*3,data.size(2),data.size(3))
-
-        print(data.size())
 
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -50,26 +50,25 @@ def trainDetect(model,optimizer,train_loader, epoch, args):
         output = model(data)
 
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).long().cpu().sum()
+        correct = pred.eq(target.data.view_as(pred)).float().cpu().sum()
+
+        total_acc += correct*1.0/len(pred)
 
         loss = F.cross_entropy(output, target)
         loss.backward()
 
-        optimizer.step()
+        total_loss += loss.data.item()
 
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f} \t'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.data.item()))
+        optimizer.step()
 
         if batch_idx > 3 and args.debug:
             break
 
-    print("Accuracy :{}%".format(100. * correct / ((batch_idx+1)*args.batch_size)))
+    writeSummaries(total_loss,total_acc,batch_idx+1,writer,epoch,"train",args.model_id,args.exp_id)
 
-    torch.save(model.state_dict(), "../nets/{}/model{}_epoch{}".format(args.exp_id,args.ind_id, epoch))
+    torch.save(model.state_dict(), "../nets/{}/model{}_epoch{}".format(args.exp_id,args.model_id, epoch))
 
-def testDetect(model,test_loader,epoch, args):
+def testDetect(model,test_loader,epoch, writer,args):
     '''Test a detecting network
     Compute the accuracy and the loss on the test set and write every output score of the net in a csv file
 
@@ -82,17 +81,14 @@ def testDetect(model,test_loader,epoch, args):
     '''
 
     model.eval()
-
-    test_loss = 0
-    correct = 0
+    print("Test epoch : ",epoch)
+    total_loss = 0
+    total_acc = 0
 
     #The header of the csv file is written after the first test batch
     firstTestBatch = True
 
     for batch_idx,(data, target) in enumerate(test_loader):
-
-        if data.size(1) ==1:
-            data = data.expand(x.size(0),x.size(1)*3,x.size(2),x.size(3))
 
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -100,17 +96,34 @@ def testDetect(model,test_loader,epoch, args):
 
         output = model(data)
 
-        test_loss += F.cross_entropy(output, target,reduction='sum').data.item() # sum up batch loss
+        total_loss += F.cross_entropy(output, target).data.item() # sum up batch loss
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).long().cpu().sum()
+
+
+        total_acc += pred.eq(target.data.view_as(pred)).float().cpu().sum()/len(pred)
 
         firstTestBatch = False
 
     #Print the results
-    test_loss /= (batch_idx+1)*args.test_batch_size
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / ((batch_idx+1)*args.test_batch_size)))
+    writeSummaries(total_loss,total_acc,batch_idx+1,writer,epoch,"val",args.model_id,args.exp_id)
+
+
+def writeSummaries(total_loss,total_acc,sampleNb,writer,epoch,mode,model_id,exp_id):
+
+    total_loss /= sampleNb
+    total_acc /= sampleNb
+
+    writer.add_scalars('Losses',{model_id+"_"+mode:total_loss},epoch)
+    writer.add_scalars('Accuracies',{model_id+"_"+mode:total_acc},epoch)
+
+    if not os.path.exists("../results/{}/model{}_epoch{}_metrics_{}.csv".format(exp_id,model_id,epoch,mode)):
+        header = "epoch,loss,acc"
+    else:
+        header = ""
+
+    with open("../results/{}/model{}_epoch{}_metrics_{}.csv".format(exp_id,model_id,epoch,mode),"a") as text_file:
+        print(header,file=text_file)
+        print("{},{},{}\n".format(epoch,total_loss,total_acc),file=text_file)
 
 def findLastNumbers(weightFileName):
     '''Extract the epoch number of a weith file name.
@@ -163,7 +176,7 @@ def get_OptimConstructor_And_Kwargs(optimStr,momentum):
 
     return optimConst,kwargs
 
-def initialize_Net_And_EpochNumber(net,init,exp_id,ind_id,cuda,netType):
+def initialize_Net_And_EpochNumber(net,start_mode, init,exp_id,model_id,cuda,netType):
     '''Initialize a clustering detecting network
 
     Can initialise with parameters from detecting network or from a clustering detecting network
@@ -175,24 +188,26 @@ def initialize_Net_And_EpochNumber(net,init,exp_id,ind_id,cuda,netType):
         pretrain (boolean): if true, the net trained is a detectNet (can be used after to initialize the detectNets of a clustDetectNet)
         init (string): the path to the weigth for initializing the net with
         exp_id (string): the name of the experience
-        ind_id (int): the id of the network
+        model_id (int): the id of the network
         cuda (bool): whether to use cuda or not
 
     Returns: the start epoch number
     '''
 
     #Initialize the detect nets with weights from a supervised training
-    if not (init is None):
+    if start_mode == "fine_tune":
         params = torch.load(init)
 
         net.load_state_dict(params)
         startEpoch = findLastNumbers(init)+1
 
     #Starting a network from scratch
-    else:
+    elif start_mode == "scratch":
         #Saving initial parameters
-        torch.save(net.state_dict(), "../nets/{}/model{}_epoch0".format(exp_id,ind_id))
+        torch.save(net.state_dict(), "../nets/{}/model{}_epoch0".format(exp_id,model_id))
         startEpoch = 1
+    else:
+        raise ValueError("Unknown start mode : ",start_mode)
 
     return startEpoch
 
@@ -221,7 +236,20 @@ def main(argv=None):
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
-    train_loader,test_loader = dataLoader.loadData(args.dataset,args.batch_size,args.test_batch_size,args.cuda,args.num_workers)
+    train_loader,test_loader,perm = dataLoader.loadData(args.dataset,args.batch_size,args.test_batch_size,args.permutate,args.cuda,args.num_workers)
+
+    if args.write_img_ex:
+
+        for i in range(10):
+            tensor = test_loader.dataset[i][0]
+            vis.writeImg('../vis/{}/{}_img{}.jpg'.format(args.exp_id,args.dataset,i),tensor.detach().numpy())
+
+            origSize = tensor.size()
+            tensor = tensor.view(-1)
+            tensor = tensor[np.argsort(perm)]
+            tensor = tensor.view(origSize)
+
+            vis.writeImg('../vis/{}/{}_img{}_noperm.jpg'.format(args.exp_id,args.dataset,i),tensor.detach().numpy())
 
     #The folders where the experience file will be written
     if not (os.path.exists("../vis/{}".format(args.exp_id))):
@@ -234,7 +262,10 @@ def main(argv=None):
     netType = "net"
 
     #Write the arguments in a config file so the experiment can be re-run
-    argreader.writeConfigFile("../nets/{}/{}{}.ini".format(args.exp_id,netType,args.ind_id))
+    argreader.writeConfigFile("../nets/{}/{}{}.ini".format(args.exp_id,netType,args.model_id))
+
+    #The writer for tensorboardX
+    writer = SummaryWriter("../results/{}".format(args.exp_id))
 
     #Building the net
     net = netBuilder.netMaker(args)
@@ -242,7 +273,7 @@ def main(argv=None):
     if args.cuda:
         net.cuda()
 
-    startEpoch = initialize_Net_And_EpochNumber(net,args.init,args.exp_id,args.ind_id,args.cuda,netType)
+    startEpoch = initialize_Net_And_EpochNumber(net,args.start_mode,args.init_path,args.exp_id,args.model_id,args.cuda,netType)
 
     #Getting the contructor and the kwargs for the choosen optimizer
     optimConst,kwargs = get_OptimConstructor_And_Kwargs(args.optim,args.momentum)
@@ -269,8 +300,8 @@ def main(argv=None):
             if lrCounter<len(args.lr)-1:
                 lrCounter += 1
 
-        trainDetect(net,optimizer,train_loader,epoch, args)
-        testDetect(net,test_loader,epoch, args)
+        trainDetect(net,optimizer,train_loader,epoch, writer,args)
+        testDetect(net,test_loader,epoch, writer,args)
 
 if __name__ == "__main__":
     main()

@@ -4,13 +4,14 @@ import os
 from skimage import feature
 import numpy as np
 
-def loadData(dataset,batch_size,test_batch_size,cuda=False,num_workers=1):
+def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers=1):
     ''' Build two dataloader
 
     Args:
         dataset (string): the name of the dataset. Can be \'MNIST\' or \'CIFAR10\'.
         batch_size (int): the batch length for training
         test_batch_size (int): the batch length for testing
+        perm (bool): Whether or not to permute the pixels of the image
         cuda (bool): whether or not to run computation on gpu
         num_workers (int): the number of workers for loading the data.
             Check pytorch documentation (torch.utils.data.DataLoader class) for more details
@@ -22,14 +23,47 @@ def loadData(dataset,batch_size,test_batch_size,cuda=False,num_workers=1):
 
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if cuda else {}
 
-    if dataset == "IMAGENET":
+    dataDict = {"MNIST":(28*28,1),"CIFAR10":(32*32,3),"IMAGENET":(224*224,3)}
+
+    if permutate:
+        permInd = np.arange(dataDict[dataset][0]*dataDict[dataset][1])
+        np.random.shuffle(permInd)
+    else:
+        permInd = np.arange(dataDict[dataset][0]*dataDict[dataset][1])
+
+    def permutFunc(x,permInd):
+        origSize = x.size()
+        x = x.view(-1)
+        x = x[permInd]
+        x = x.view(origSize)
+        return x
+    perm = transforms.Lambda(lambda x:permutFunc(x,permInd))
+
+    if dataset == "MNIST":
+
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST('../data/MNIST', train=True, download=True, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
+            batch_size=batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(datasets.MNIST('../data/MNIST', train=False, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
+            batch_size=test_batch_size, shuffle=False, **kwargs)
+
+    elif dataset == "CIFAR10":
+        train_loader = torch.utils.data.DataLoader(datasets.CIFAR10('../data/', train=True, download=True, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
+            batch_size=batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(datasets.CIFAR10('../data/', train=False, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
+            batch_size=test_batch_size, shuffle=False, **kwargs)
+
+    elif dataset == "IMAGENET":
 
         traindir = os.path.join("../data/ImageNet", 'train')
         valdir = os.path.join("../data/ImageNet", 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
 
-        train_dataset = datasets.ImageFolder(traindir,transforms.Compose([transforms.RandomResizedCrop(224),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize]))
+        train_dataset = datasets.ImageFolder(traindir,transforms.Compose([transforms.RandomResizedCrop(224),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,perm]))
 
         train_sampler = None
 
@@ -37,34 +71,14 @@ def loadData(dataset,batch_size,test_batch_size,cuda=False,num_workers=1):
             train_dataset, batch_size=batch_size, shuffle=(train_sampler is None),
             num_workers=kwargs["num_workers"], pin_memory=True, sampler=train_sampler)
 
-        test_loader = torch.utils.data.DataLoader(datasets.ImageFolder(valdir, transforms.Compose([transforms.Resize(256),transforms.CenterCrop(224),transforms.ToTensor(),normalize])),
-            batch_size=test_batch_size, shuffle=False,
-            num_workers=kwargs["num_workers"], pin_memory=True)
-
-    elif dataset == "EDGENET":
-
-                # Data loading code
-        traindir = os.path.join("../data/ImageNet", 'train')
-        valdir = os.path.join("../data/ImageNet", 'val')
-
-        edgeDet = transforms.Lambda(lambda x: (feature.canny(np.array(x).mean(2))*255).astype("uint8"))
-
-        train_dataset = datasets.ImageFolder(traindir,transforms.Compose([transforms.RandomResizedCrop(224),edgeDet,transforms.ToPILImage(),transforms.RandomHorizontalFlip(),transforms.ToTensor()]))
-
-        train_sampler = None
-
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=(train_sampler is None),
-            num_workers=kwargs["num_workers"], pin_memory=True, sampler=train_sampler)
-
-        test_loader = torch.utils.data.DataLoader(datasets.ImageFolder(valdir, transforms.Compose([transforms.Resize(256),edgeDet,transforms.ToPILImage(),transforms.CenterCrop(224),transforms.ToTensor()])),
+        test_loader = torch.utils.data.DataLoader(datasets.ImageFolder(valdir, transforms.Compose([transforms.Resize(256),transforms.CenterCrop(224),transforms.ToTensor(),normalize,perm])),
             batch_size=test_batch_size, shuffle=False,
             num_workers=kwargs["num_workers"], pin_memory=True)
 
     else:
         raise ValueError("Unknown dataset",dataset)
 
-    return train_loader,test_loader
+    return train_loader,test_loader,permInd
 
 if __name__ == '__main__':
 

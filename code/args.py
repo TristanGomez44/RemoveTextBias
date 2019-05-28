@@ -91,9 +91,19 @@ class ArgReader():
 
         self.parser.add_argument('--geom', type=str2bool,metavar='NOCUDA',
                             help='To add geometric layers')
+        self.parser.add_argument('--permutate', type=str2bool,metavar='NOCUDA',
+                            help='To generate one permutation and permutate the pixels of all images with it.')
+        self.parser.add_argument('--write_img_ex', type=str2bool,metavar='NOCUDA',
+                            help='To write some images of the dataset on the disk')
 
         self.parser.add_argument('--modeltype', type=str, metavar='M',
                             help='The model type. Can be \'resnet\' or \'cnn\'.')
+
+        self.parser.add_argument('--start_mode', type=str,metavar='SM',
+                    help='The mode to use to initialise the model. Can be \'scratch\' or \'fine_tune\'.')
+
+        self.parser.add_argument('--init_path', type=str,metavar='SM',
+                    help='The path to the weight file to use to initialise the network')
 
         self.parser.add_argument('--momentum', type=float, metavar='M',
                             help='SGD momentum')
@@ -103,7 +113,7 @@ class ArgReader():
                             help='random seed')
         self.parser.add_argument('--log_interval', type=int, metavar='N',
                             help='how many batches to wait before logging training status')
-        self.parser.add_argument('--ind_id', type=int, metavar='IND_ID',
+        self.parser.add_argument('--model_id', type=str, metavar='IND_ID',
                             help='the id of the individual')
         self.parser.add_argument('--exp_id', type=str, metavar='EXP_ID',
                             help='the id of the experience')
