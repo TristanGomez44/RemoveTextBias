@@ -45,8 +45,6 @@ class BasicBlock(nn.Module):
         super(BasicBlock, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        if groups != 1 or base_width != 64:
-            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
@@ -131,25 +129,30 @@ class Bottleneck(nn.Module):
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
-                 groups=1, width_per_group=64, norm_layer=None,geom=False):
+                 groups=1, width_per_group=64, norm_layer=None,geom=False,inChan=3,maxpool=True,strides=[2,2,2,2],firstConvKer=7,inPlanes=64):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
-        self.inplanes = 64
+        self.inplanes = inPlanes
+        self.maxpool = maxpool
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+
+        if firstConvKer%2 != 1:
+            raise ValueError("The kernel size of the first convolution should be an odd number")
+
+        self.conv1 = nn.Conv2d(inChan, self.inplanes, kernel_size=firstConvKer, stride=strides[0], padding=firstConvKer//2,
                                bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64,  layers[0], stride=1, norm_layer=norm_layer,geom=geom)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, norm_layer=norm_layer,geom=geom)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, norm_layer=norm_layer,geom=geom)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, norm_layer=norm_layer,geom=geom)
+        self.layer1 = self._make_layer(block, inPlanes,  layers[0], stride=1, norm_layer=norm_layer,geom=geom)
+        self.layer2 = self._make_layer(block, inPlanes*2, layers[1], stride=strides[1], norm_layer=norm_layer,geom=geom)
+        self.layer3 = self._make_layer(block, inPlanes*4, layers[2], stride=strides[2], norm_layer=norm_layer,geom=geom)
+        self.layer4 = self._make_layer(block, inPlanes*8, layers[3], stride=strides[3], norm_layer=norm_layer,geom=geom)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear(inPlanes*8 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -192,7 +195,9 @@ class ResNet(nn.Module):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+
+        if self.maxpool:
+            x = self.maxpool(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
