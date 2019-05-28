@@ -161,14 +161,10 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
 
 def writeImg(path,img):
 
-    np_img = img+np.abs(img.min())
+    np_img = resize(img,(img.shape[0],300,300),mode="constant", order=0,anti_aliasing=True)
 
-    np_img = (255*np_img/np_img.max()).astype('int')
-    #print(np_img)
-    np_img = resize(np_img,(np_img.shape[0],300,300),mode="constant", order=0,anti_aliasing=True)
-
-    np_img = np_img+np.abs(np_img.min())
-    np_img = (255*np_img/np_img.max()).astype('int')
+    np_img = (np_img-np_img.min())/(np_img.max()-np_img.min())
+    np_img = (255*np_img).astype('int')
 
     np_img = np.transpose(np_img, (1, 2, 0))
 
@@ -229,19 +225,19 @@ def main(argv=None):
 
             print("Image ",i)
 
-            img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
+            img = Variable(test_loader.dataset[i][0])
 
             #if img.size(1) != 3:
             #    img = img.expand((img.size(0),3,img.size(2),img.size(3)))
 
-            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image[0,:].detach().numpy())
+            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image.detach().numpy())
 
             img.requires_grad = True
 
             #if unitInd is None:
             #    unitInd = label.item()
 
-            opt(img,model,args.exp_id,args.ind_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
+            opt(img,model,args.exp_id,args.model_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
                 epoch=args.epochs,nbPrint=args.log_interval,stopThre=args.stop_thres,reg_weight=args.reg_weight)
 
             #salMap_der(img,model,i)
