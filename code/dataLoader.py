@@ -23,7 +23,7 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
 
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if cuda else {}
 
-    dataDict = {"MNIST":(28*28,1),"CIFAR10":(32*32,3),"IMAGENET":(224*224,3)}
+    dataDict = {"MNIST":(28*28,1),"FAKENIST":(28*28,1),"CIFAR10":(32*32,3),"IMAGENET":(224*224,3)}
 
     if permutate:
         permInd = np.arange(dataDict[dataset][0]*dataDict[dataset][1])
@@ -55,6 +55,13 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
         test_loader = torch.utils.data.DataLoader(datasets.CIFAR10('../data/', train=False, transform=transforms.Compose([
                                transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
             batch_size=test_batch_size, shuffle=False, **kwargs)
+
+    elif dataset == "FAKENIST":
+
+        dataset = datasets.FakeData(image_size=(1, 28, 28), num_classes=10,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm]))
+        train_loader = torch.utils.data.DataLoader(dataset,batch_size=batch_size, shuffle=True, **kwargs)
+
+        test_loader = torch.utils.data.DataLoader(dataset,batch_size=test_batch_size, shuffle=False, **kwargs)
 
     elif dataset == "IMAGENET":
 
