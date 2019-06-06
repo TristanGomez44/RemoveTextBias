@@ -47,7 +47,7 @@ def trainDetect(model,optimizer,train_loader, epoch, writer,args):
 
         optimizer.zero_grad()
 
-        output = model(data)
+        output,_ = model(data)
 
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
         correct = pred.eq(target.data.view_as(pred)).float().cpu().sum()
@@ -94,7 +94,7 @@ def testDetect(model,test_loader,epoch, writer,args):
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data), Variable(target)
 
-        output = model(data)
+        output,_ = model(data)
 
         total_loss += F.cross_entropy(output, target).data.item() # sum up batch loss
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
