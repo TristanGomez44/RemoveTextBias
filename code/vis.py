@@ -101,12 +101,11 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
 
     #for i in range(1, epoch+1):
         optimizer.zero_grad()
-
         output,actArr = model(image)
 
         if layToOpti == "conv":
-            act = actArr[-2][0,unitInd].mean()
-        elif layToOpti == "logit":
+            act = actArr[0,unitInd].mean()
+        elif layToOpti == "dense":
             act = output[0,unitInd]
 
         # Loss function is minus the mean of the output of the selected layer/filter
@@ -160,13 +159,14 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
     writeImg('../vis/{}/img{}_model{}_'.format(exp_id,imgInd,model_id)+'_u' + str(unitInd) + '_iter'+str(i)+'.jpg',image.detach().numpy()[0,:])
 
 def writeImg(path,img):
-
+    print(img.shape)
     np_img = resize(img,(img.shape[0],300,300),mode="constant", order=0,anti_aliasing=True)
 
     np_img = (np_img-np_img.min())/(np_img.max()-np_img.min())
     np_img = (255*np_img).astype('int')
 
-    np_img = np.transpose(np_img, (1, 2, 0))
+    if len(np_img.shape) == 3:
+        np_img = np.transpose(np_img, (1, 2, 0))
 
     cv2.imwrite(path,np_img)
 
@@ -176,7 +176,7 @@ def main(argv=None):
     #Building the arg reader
     argreader = ArgReader(argv)
 
-    argreader.parser.add_argument('--max_act', type=str,nargs=4, metavar='NOISE',
+    argreader.parser.add_argument('--max_act', type=str,nargs='*', metavar='VAL',
                         help='To visualise an image that maximise the activation of one unit in the last layer. \
                         The values are :\
                             the path to the model, \
@@ -184,11 +184,18 @@ def main(argv=None):
                             the layer to optimise. Can be \'conv\' or \'dense\' \
                             the unit to optimise. If not indicated, the unit number i will be optimised if image has label number i.')
 
+    argreader.parser.add_argument('--plot_feat_map', type=str,nargs='*', metavar='VAL',
+                        help='To visualise the last feature map of a model. \
+                        The values are :\
+                            the path to the model, \
+                            the number of image to be created')
+
     argreader.parser.add_argument('--stop_thres', type=float, default=0.000005,metavar='NOISE',
                         help='If the distance travelled by parameters during activation maximisation become lesser than this parameter, the optimisation stops.')
 
     argreader.parser.add_argument('--reg_weight', type=float, default=0,metavar='NOISE',
                         help='The weight of the regularisation during activation maximisation.')
+
 
     #Reading the comand line arg
     argreader.getRemainingArgs()
@@ -206,7 +213,7 @@ def main(argv=None):
         modelPath = args.max_act[0]
         nbImages = int(args.max_act[1])
         layToOpti = args.max_act[2]
-        unitInd = int(args.max_act[3])
+
 
         random.seed(args.seed)
 
@@ -214,7 +221,7 @@ def main(argv=None):
         model = netBuilder.netMaker(args)
         model.load_state_dict(torch.load(modelPath))
 
-        _,test_loader = dataLoader.loadData(args.dataset,args.batch_size,1,args.cuda,args.num_workers)
+        _,test_loader,_ = dataLoader.loadData(args.dataset,args.batch_size,1,False,args.cuda,args.num_workers)
 
         #Comouting image that maximises activation of the given unit in the given layer
         maxInd = len(test_loader.dataset) - 1
@@ -225,27 +232,53 @@ def main(argv=None):
 
             print("Image ",i)
 
-            img = Variable(test_loader.dataset[i][0])
-
-            #if img.size(1) != 3:
-            #    img = img.expand((img.size(0),3,img.size(2),img.size(3)))
-
-            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image.detach().numpy())
-
+            img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
             img.requires_grad = True
 
-            #if unitInd is None:
-            #    unitInd = label.item()
+            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image[0].detach().numpy())
+
+            if len(args.max_act) == 4:
+                unitInd = int(args.max_act[3])
+            else:
+                unitInd = label.item()
 
             opt(img,model,args.exp_id,args.model_id,i,unitInd=unitInd,lr=args.lr,momentum=args.momentum,optimType='LBFGS',layToOpti=layToOpti,\
                 epoch=args.epochs,nbPrint=args.log_interval,stopThre=args.stop_thres,reg_weight=args.reg_weight)
 
-            #salMap_der(img,model,i)
-            #salMap_mask(img,model,i)
-
             if i == nbImages-1:
                 break
 
+    if args.plot_feat_map:
 
+        modelPath = args.plot_feat_map[0]
+        nbImages = int(args.plot_feat_map[1])
+
+        #Building the net
+        model = netBuilder.netMaker(args)
+        model.load_state_dict(torch.load(modelPath))
+
+        _,test_loader,_ = dataLoader.loadData(args.dataset,args.batch_size,1,False,args.cuda,args.num_workers)
+
+        #Comouting image that maximises activation of the given unit in the given layer
+        maxInd = len(test_loader.dataset) - 1
+
+        model.eval()
+
+        for i,(image,label) in enumerate(test_loader):
+
+            print("Image ",i)
+
+            img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
+
+            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image[0].detach().numpy())
+
+            _,featMaps = model(img)
+
+            for j in range(len(featMaps[0])):
+
+                writeImg('../vis/{}/model_{}_img{}_map{}_.jpg'.format(args.exp_id,args.model_id,i,j),featMaps[0,j].detach().unsqueeze(0).numpy())
+
+            if i == nbImages-1:
+                break
 if __name__ == "__main__":
     main()
