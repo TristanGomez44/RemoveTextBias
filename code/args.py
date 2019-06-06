@@ -124,6 +124,18 @@ class ArgReader():
         self.parser.add_argument('--dataset', type=str, metavar='N',
                             help='the dataset to use')
 
+        self.parser.add_argument('--model', type=str, metavar='N',
+                            help='The model type to use. Can be \'cnn\' or \'gnn\'')
+        self.parser.add_argument('--nb_lay_gnn', type=int, metavar='N',
+                            help='The layers number of the gnn.')
+        self.parser.add_argument('--chan_gnn', type=int, metavar='N',
+                            help='The channel number per layer of the gnn.')
+        self.parser.add_argument('--res_con_gnn' , type=str2bool, metavar='N',
+                            help='To add residual connection between layers')
+        self.parser.add_argument('--batch_norm_gnn' , type=str2bool, metavar='N',
+                            help='To add batch normalization between layers')
+
+
         self.parser.add_argument('--debn' , type=str2bool, metavar='N',
                             help='Whether to apply batch normalization on the detection net or not')
         self.parser.add_argument('--denblayers', type=int, metavar='N',
@@ -153,6 +165,7 @@ class ArgReader():
 
         self.parser.add_argument('--debug', type=str2bool, metavar='N',
                             help='To run only a few batch of training')
+
 
 
         self.args = None
