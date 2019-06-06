@@ -46,18 +46,12 @@ class BasicBlock(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.lay1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.conv2 = conv3x3(planes, planes)
-
-        self.geom = geom
-        if geom:
-            self.geomTrans = GeoTrans()
-        else:
-            self.geomTrans = None
+        self.lay2 = conv3x3(planes, planes)
 
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
@@ -66,15 +60,12 @@ class BasicBlock(nn.Module):
     def forward(self, x):
         identity = x
 
-        out = self.conv1(x)
+        out = self.lay1(x)
         out = self.bn1(out)
         out = self.relu(out)
 
-        out = self.conv2(out)
+        out = self.lay2(out)
         out = self.bn2(out)
-
-        if self.geom:
-            out = self.geomTrans(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -88,7 +79,7 @@ class Bottleneck(nn.Module):
     expansion = 4
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, norm_layer=None):
+                 base_width=64, norm_layer=None,geom=False):
         super(Bottleneck, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -194,12 +185,12 @@ class ResNet(nn.Module):
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)
+        featMaps = self.relu(x)
 
         if self.maxpool:
-            x = self.maxpool(x)
+            featMaps = self.maxpool(featMaps)
 
-        x = self.layer1(x)
+        x = self.layer1(featMaps)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
@@ -208,7 +199,7 @@ class ResNet(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
 
-        return x
+        return x,featMaps
 
 
 def resnet18(pretrained=False, **kwargs):
