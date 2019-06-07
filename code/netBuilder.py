@@ -24,69 +24,58 @@ class MaxPool2d_G(nn.Module):
     def forward(self,x):
 
         convKerSize = x.size(-2)//self.kerSize[0],x.size(-1)//self.kerSize[1]
-        print(convKerSize)
 
-        weight = torch.ones((convKerSize)).unsqueeze(0).unsqueeze(0).expand(x.size(1),1,convKerSize[0],convKerSize[1])
-
+        #Compute the mean activation in every rectangle of size convKerSize with a convolution
+        weight = (torch.ones((convKerSize)).unsqueeze(0).unsqueeze(0).expand(x.size(1),1,convKerSize[0],convKerSize[1])/(convKerSize[0]+convKerSize[1])).to(x.device)
         x_conv = torch.nn.functional.conv1d(x, weight,padding=(convKerSize[0]//2,convKerSize[1]//2),groups=x.size(1))[:,:,:x.size(-2),:x.size(-1)]
 
+        #Get the position of the maxima for each feature map of each batch
         origImgSize = x.size(-2),x.size(-1)
         x_conv = x_conv.contiguous().view(x.size(0),x.size(1),x.size(2)*x.size(3))
-        #print(x.size())
-
         argm = torch.argmax(x_conv, dim=-1)
         argm = argm//origImgSize[0],argm%origImgSize[1]
-        #print(argm)
-        x = x.view(x.size(0),x.size(1),origImgSize[0],origImgSize[1])
-        #print(x.size())
-        paddedX = torch.zeros((x.size(0),x.size(1),x.size(2)+x.size(2)//(2*self.kerSize[0]),x.size(3)+x.size(3)//(2*self.kerSize[1])))
 
-        print("paddedX",paddedX.size())
-
+        #Padd the input with zeros on the border
+        paddedX = torch.zeros((x.size(0),x.size(1),x.size(2)+x.size(2)//(self.kerSize[0]),x.size(3)+x.size(3)//(self.kerSize[1]))).to(x.device)
         ctr = paddedX.size(-2)//2,paddedX.size(-1)//2
         offs = convKerSize[0],convKerSize[1]
-        #print("ctr,offs",ctr,offs)
-
-        #print(ctr,offs,ctr[0]-offs[0],ctr[0]+offs[0],ctr[1]-offs[1],ctr[1]+offs[1])
-        #print(paddedX.size())
-
         paddedX[:,:,ctr[0]-offs[0]:ctr[0]+offs[0]+x.size(-2)%2,ctr[1]-offs[1]:ctr[1]+offs[1]+x.size(-1)%2] = x
 
-        rowInds = torch.arange(paddedX.size(-2)).unsqueeze(1).expand(paddedX.size(-2),paddedX.size(-1))
-        colInds = torch.arange(paddedX.size(-1)).unsqueeze(0).expand(paddedX.size(-2),paddedX.size(-1))
-
+        #Compute the binary mask indicating the position of the selected pixels
+        rowInds = torch.arange(paddedX.size(-2)).unsqueeze(1).expand(paddedX.size(-2),paddedX.size(-1)).to(x.device)
+        colInds = torch.arange(paddedX.size(-1)).unsqueeze(0).expand(paddedX.size(-2),paddedX.size(-1)).to(x.device)
         rowInds = rowInds.unsqueeze(0).unsqueeze(0).expand(argm[0].size(0),argm[0].size(1),paddedX.size(-2),paddedX.size(-1))
         colInds = colInds.unsqueeze(0).unsqueeze(0).expand(argm[1].size(0),argm[1].size(1),paddedX.size(-2),paddedX.size(-1))
 
         argm = argm[0].unsqueeze(-1).unsqueeze(-1),argm[1].unsqueeze(-1).unsqueeze(-1)
-
-        #print(argm[0]-convKerSize[0]//2,argm[0]+convKerSize[0]//2,argm[1]-convKerSize[1]//2,argm[1]+convKerSize[1]//2)
+        argm = argm[0]+x.size(2)//(2*self.kerSize[0]),argm[1]+x.size(3)//(2*self.kerSize[1])
 
         binaryArr = (argm[0]-convKerSize[0]//2 <= rowInds)*(rowInds <= argm[0]+convKerSize[0]//2-(convKerSize[0]%2==0))*(argm[1]-convKerSize[1]//2 <= colInds)*(colInds <= argm[1]+convKerSize[1]//2-(convKerSize[1]%2==0))
-        print(binaryArr)
-        print(argm[0],argm[0]-convKerSize[0]//2,argm[0]+convKerSize[0]//2-1)
-        print(argm[1],argm[1]-convKerSize[1]//2,argm[1]+convKerSize[1]//2-1)
-        #print(rowInds,colInds)
 
-        #print(binaryArr)
-
-
-        #print(argm[0],argm[1],rowInds)
-
+        #Selecting the pixels
         x = paddedX[binaryArr].view(x.size(0),x.size(1),convKerSize[0],convKerSize[1])
 
         return x
 
 class GNN(nn.Module):
 
-    def __init__(self,inChan,inSize,chan,nbLay,nbOut,resCon,batchNorm):
+    def __init__(self,inChan,inSize,chan,nbLay,nbOut,resCon,batchNorm,maxPoolPos,maxPoolKer):
 
         super(GNN, self).__init__()
 
         self.inLay = GeomLayer(inChan,inSize,chan,batchNorm)
         self.resCon = resCon
 
-        layers = nn.ModuleList(GeomLayer(chan,inSize,chan,batchNorm) for _ in range(nbLay))
+        layList = []
+        for i in range(nbLay+(not maxPoolPos is None)):
+
+            if i == maxPoolPos:
+                layList.append(MaxPool2d_G((maxPoolKer,maxPoolKer)))
+            else:
+                layList.append(GeomLayer(chan,inSize,chan,batchNorm))
+
+        layers = nn.ModuleList(layList)
+
         self.layers = nn.Sequential(*layers)
         self.dense = nn.Linear(chan,nbOut)
         print(self)
@@ -133,7 +122,7 @@ class GeomLayer(nn.Module):
         if not self.batchNorm is None:
             x = self.batchNorm(x)
 
-        linComb = self.linComb.unsqueeze(0).unsqueeze(3).unsqueeze(4)
+        linComb = self.linComb.unsqueeze(0).unsqueeze(3).unsqueeze(4).to(x.device)
         linComb = linComb.expand(x.size(0),self.chan,x.size(1),x.size(2),x.size(3))
 
         x = x.unsqueeze(1).expand(x.size(0),self.chan,x.size(1),x.size(2),x.size(3))
@@ -149,7 +138,7 @@ class GeomLayer(nn.Module):
 
     def applyAffTrans(self,x,geoParams):
 
-        geoParams = geoParams.unsqueeze(0).expand(x.size(0),self.chan,2,3)
+        geoParams = geoParams.unsqueeze(0).expand(x.size(0),self.chan,2,3).to(x.device)
         geoParams = geoParams.contiguous().view(x.size(0)*self.chan,2,3)
         x = x.view(x.size(0)*x.size(1),x.size(2),x.size(3),x.size(4))
         grid = F.affine_grid(geoParams, x.size())
@@ -196,7 +185,7 @@ def netMaker(args):
             net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=args.geom,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
                                 strides=[1,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
         elif args.model == "gnn":
-            net = GNN(inChan,inSize,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn)
+            net = GNN(inChan,inSize,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
 
         else:
             raise ValueError("Unknown model type : {}".format(args.model))
@@ -317,7 +306,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     maxpool_g = MaxPool2d_G(torch.tensor([2,2]))
 
-    size = 20
+    size = 28
 
     rowInds = torch.arange(size).unsqueeze(1).expand(size,size)
     colInds = torch.arange(size).unsqueeze(0).expand(size,size)
@@ -325,14 +314,18 @@ if __name__ == "__main__":
     rowInds = rowInds.unsqueeze(0).unsqueeze(0).expand(1,1,size,size).float()
     colInds = colInds.unsqueeze(0).unsqueeze(0).expand(1,1,size,size).float()
 
-    dist = torch.exp(-(torch.pow(rowInds - 7,2)+torch.pow(colInds - 7,2))/10)*7
+    dist = torch.exp(-(torch.pow(rowInds - 2,2)+torch.pow(colInds - 2,2))/10)*7
 
     noise = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([0.0]), covariance_matrix=torch.eye(1)).sample(dist.size()).squeeze(dim=-1)
-    print(noise.size(),dist.size())
-    plotHeat((dist+noise)[0,0],"../vis/testMaxPool_in.png")
 
-    res = maxpool_g(dist+noise)
-    print(res.size())
-    plotHeat(res[0,0],"../vis/testMaxPool_out.png")
+    dist = dist+noise
 
-    print((dist+noise).max(),res[0,0].max())
+    dist = dist.expand(128,8,dist.size(-2),dist.size(-1))
+
+    plotHeat(dist[0,0],"../vis/testMaxPool_in0.png")
+    plotHeat(dist[0,1],"../vis/testMaxPool_in1.png")
+
+    res = maxpool_g(dist)
+
+    plotHeat(res[0,0],"../vis/testMaxPool_out0.png")
+    plotHeat(res[0,0],"../vis/testMaxPool_out1.png")
