@@ -134,7 +134,10 @@ class ArgReader():
                             help='To add residual connection between layers')
         self.parser.add_argument('--batch_norm_gnn' , type=str2bool, metavar='N',
                             help='To add batch normalization between layers')
-
+        self.parser.add_argument('--max_pool_pos', type=int, metavar='N',
+                            help='The position of the max pooling layer in the network. Set to None to remove it')
+        self.parser.add_argument('--max_pool_ker', type=int, metavar='N',
+                            help='The kernel size of the max pooling layer')
 
         self.parser.add_argument('--debn' , type=str2bool, metavar='N',
                             help='Whether to apply batch normalization on the detection net or not')
