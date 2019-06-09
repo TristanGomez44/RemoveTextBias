@@ -38,8 +38,8 @@ class MaxPool2d_G(nn.Module):
         #Padd the input with zeros on the border
         paddedX = torch.zeros((x.size(0),x.size(1),x.size(2)+x.size(2)//(self.kerSize[0]),x.size(3)+x.size(3)//(self.kerSize[1]))).to(x.device)
         ctr = paddedX.size(-2)//2,paddedX.size(-1)//2
-        offs = convKerSize[0],convKerSize[1]
-        paddedX[:,:,ctr[0]-offs[0]:ctr[0]+offs[0]+x.size(-2)%2,ctr[1]-offs[1]:ctr[1]+offs[1]+x.size(-1)%2] = x
+        widths = x.size(-2)//2,x.size(-1)//2
+        paddedX[:,:,ctr[0]-widths[0]:ctr[0]+widths[0]+x.size(-2)%2,ctr[1]-widths[1]:ctr[1]+widths[1]+x.size(-1)%2] = x
 
         #Compute the binary mask indicating the position of the selected pixels
         rowInds = torch.arange(paddedX.size(-2)).unsqueeze(1).expand(paddedX.size(-2),paddedX.size(-1)).to(x.device)
@@ -57,22 +57,60 @@ class MaxPool2d_G(nn.Module):
 
         return x
 
+class BoxPool(nn.Module):
+
+    def __init__(self,chan):
+        super(BoxPool, self).__init__()
+
+        self.chan = chan
+
+        initVal = torch.eye(3)[:2].unsqueeze(0).expand(chan,2,3).float()
+        #initVal[:,0,2] = 0.75
+        #initVal[:,1,2] = 0.75
+        noise = Variable(initVal.data.new(initVal.size()).normal_(0, 0.1))
+        self.boxParams = nn.Parameter(initVal+noise)
+
+    def forward(self,x):
+
+        box = self.applyAffTrans(torch.ones_like(x),self.boxParams)
+
+        return x*box
+
+    def applyAffTrans(self,x,geoParams):
+
+        geoParams = geoParams.unsqueeze(0).expand(x.size(0),self.chan,2,3).to(x.device)
+        geoParams = geoParams.contiguous().view(x.size(0)*self.chan,2,3)
+
+        x = x.view(x.size(0)*x.size(1),1,x.size(2),x.size(3))
+
+        grid = F.affine_grid(geoParams, x.size())
+
+        #grid = torch.remainder(grid+1,2)-1
+
+        xSamp = F.grid_sample(x, grid)
+        xSamp = xSamp.view(xSamp.size(0)//self.chan,self.chan,xSamp.size(2),xSamp.size(3))
+
+        return xSamp
+        #template = self.template.unsqueeze(0).expand(x.size(0),self.template.size(0),self.template.size(1),self.template.size(2))
+
+        #x = F.relu(x*template)
+
 class GNN(nn.Module):
 
-    def __init__(self,inChan,inSize,chan,nbLay,nbOut,resCon,batchNorm,maxPoolPos,maxPoolKer):
+    def __init__(self,inChan,chan,nbLay,nbOut,resCon,batchNorm,maxPoolPos,maxPoolKer):
 
         super(GNN, self).__init__()
 
-        self.inLay = GeomLayer(inChan,inSize,chan,batchNorm)
+        self.inLay = GeomLayer(inChan,chan,batchNorm)
         self.resCon = resCon
 
         layList = []
-        for i in range(nbLay+(not maxPoolPos is None)):
+        for i in range(nbLay+(maxPoolPos != -1)):
 
             if i == maxPoolPos:
                 layList.append(MaxPool2d_G((maxPoolKer,maxPoolKer)))
             else:
-                layList.append(GeomLayer(chan,inSize,chan,batchNorm))
+                layList.append(GeomLayer(chan,chan,batchNorm))
 
         layers = nn.ModuleList(layList)
 
@@ -96,7 +134,7 @@ class GNN(nn.Module):
 
 class GeomLayer(nn.Module):
 
-    def __init__(self,inChan,inSize,chan,batchNorm):
+    def __init__(self,inChan,chan,batchNorm,boxPool=True,stride=1):
 
         super(GeomLayer, self).__init__()
 
@@ -108,14 +146,15 @@ class GeomLayer(nn.Module):
         self.geoParams = nn.Parameter(initVal+noise)
         self.linComb = nn.Parameter(torch.rand(chan,inChan))
 
+        self.stride = stride
+
         self.chan = chan
         self.batchNorm = nn.BatchNorm2d(inChan) if batchNorm else None
 
-        initVal = torch.eye(3)[:2].unsqueeze(0).expand(chan,2,3).float()
-        #initVal[:,0,2] = 0.75
-        #initVal[:,1,2] = 0.75
-        noise = Variable(initVal.data.new(initVal.size()).normal_(0, 0.1))
-        self.boxParams = nn.Parameter(initVal+noise)
+        if boxPool:
+            self.bxPool = BoxPool(chan)
+        else:
+            self.bxPool = None
 
     def forward(self,x):
 
@@ -126,15 +165,18 @@ class GeomLayer(nn.Module):
         linComb = linComb.expand(x.size(0),self.chan,x.size(1),x.size(2),x.size(3))
 
         x = x.unsqueeze(1).expand(x.size(0),self.chan,x.size(1),x.size(2),x.size(3))
-
         x = (x*linComb).sum(dim=2,keepdim=True)
-
-        box = self.applyAffTrans(torch.ones_like(x),self.boxParams)
         x = self.applyAffTrans(x,self.geoParams)
 
-        finalPred = x*box
+        if self.stride > 1:
+            ctr = x.size(-2)//2,x.size(-1)//2
+            win = x.size(-2)//self.stride,x.size(-1)//self.stride
+            x = x[:,:,ctr[0]-win[0]//2:ctr[0]+win[0]//2,ctr[1]-win[1]//2:ctr[1]+win[1]//2]
 
-        return finalPred
+        if not self.bxPool is None:
+            x = self.bxPool(x)
+
+        return x
 
     def applyAffTrans(self,x,geoParams):
 
@@ -182,10 +224,13 @@ def netMaker(args):
         numClasses = 10
 
         if args.model == "cnn":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=args.geom,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
                                 strides=[1,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
         elif args.model == "gnn":
-            net = GNN(inChan,inSize,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
+            net = GNN(inChan,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
+        elif args.model == "gnn_resnet":
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
+                                strides=[1,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
 
         else:
             raise ValueError("Unknown model type : {}".format(args.model))
@@ -304,7 +349,7 @@ if __name__ == "__main__":
     '''
     np.random.seed(0)
     torch.manual_seed(0)
-    maxpool_g = MaxPool2d_G(torch.tensor([2,2]))
+    maxpool_g = MaxPool2d_G(torch.tensor([3,3]))
 
     size = 28
 
