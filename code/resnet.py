@@ -24,19 +24,6 @@ def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
-class GeoTrans(nn.Module):
-
-    def __init__(self):
-        super(GeoTrans, self).__init__()
-        self.params = nn.Parameter(torch.tensor([[1,0,0],[0,1,0]]).float())
-
-    def forward(self,x):
-
-        grid = F.affine_grid(self.params.unsqueeze(0).expand(x.size(0),2,3), x.size())
-        x = F.grid_sample(x, grid)
-
-        return x
-
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -45,24 +32,28 @@ class BasicBlock(nn.Module):
         super(BasicBlock, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
-        self.lay1 = conv3x3(inplanes, planes, stride)
+        # Both self.lay1 and self.downsample layers downsample the input when stride != 1
+        self.geom=geom
+
+        if geom:
+            self.lay1 = netBuilder.GeomLayer(inplanes,planes,batchNorm=False,boxPool=False,stride=stride)
+            self.actFunc = netBuilder.BoxPool(planes)
+            self.lay2 = netBuilder.GeomLayer(planes,planes,batchNorm=False,boxPool=False)
+        else:
+            self.lay1 = conv3x3(inplanes, planes, stride)
+            self.actFunc = nn.ReLU(inplace=True)
+            self.lay2 = conv3x3(planes, planes)
+
         self.bn1 = norm_layer(planes)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        self.lay2 = conv3x3(planes, planes)
-
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
-        self.stride = stride
 
     def forward(self, x):
         identity = x
 
         out = self.lay1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = self.actFunc(out)
 
         out = self.lay2(out)
         out = self.bn2(out)
@@ -71,7 +62,7 @@ class BasicBlock(nn.Module):
             identity = self.downsample(x)
 
         out += identity
-        out = self.relu(out)
+        out = self.actFunc(out)
 
         return out
 
@@ -85,35 +76,44 @@ class Bottleneck(nn.Module):
             norm_layer = nn.BatchNorm2d
         width = int(planes * (base_width / 64.)) * groups
         # Both self.conv2 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv1x1(inplanes, width)
+
+        if geom:
+            self.lay2 = netBuilder.GeomLayer(width,width,batchNorm=False,boxPool=False,stride=stride)
+            self.actFunc = netBuilder.BoxPool(width)
+        else:
+            self.lay2 = conv3x3(width, width, stride, groups)
+            self.actFunc = nn.ReLU(inplace=True)
+
+        self.lay1 = conv1x1(inplanes, width)
+        self.lay3 = conv1x1(width, planes * self.expansion)
+        self.actFunc = nn.ReLU(inplace=True)
+
         self.bn1 = norm_layer(width)
-        self.conv2 = conv3x3(width, width, stride, groups)
         self.bn2 = norm_layer(width)
-        self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
-        self.relu = nn.ReLU(inplace=True)
+
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x):
         identity = x
 
-        out = self.conv1(x)
+        out = self.lay1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = self.actFunc(out)
 
-        out = self.conv2(out)
+        out = self.lay2(out)
         out = self.bn2(out)
-        out = self.relu(out)
+        out = self.actFunc(out)
 
-        out = self.conv3(out)
+        out = self.lay3(out)
         out = self.bn3(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
 
         out += identity
-        out = self.relu(out)
+        out = self.actFunc(out)
 
         return out
 
@@ -132,12 +132,21 @@ class ResNet(nn.Module):
 
         if firstConvKer%2 != 1:
             raise ValueError("The kernel size of the first convolution should be an odd number")
+        self.geom = geom
 
-        self.conv1 = nn.Conv2d(inChan, self.inplanes, kernel_size=firstConvKer, stride=strides[0], padding=firstConvKer//2,
-                               bias=False)
+        if geom:
+
+            self.lay1 = netBuilder.GeomLayer(inChan,self.inplanes,batchNorm=False,boxPool=False)
+            self.actFunc = netBuilder.BoxPool(self.inplanes)
+            self.maxpool = netBuilder.MaxPool2d_G((3,3))
+
+        else:
+            self.lay1 = nn.Conv2d(inChan, self.inplanes, kernel_size=firstConvKer, stride=strides[0], padding=firstConvKer//2,bias=False)
+            self.actFunc = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
         self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
         self.layer1 = self._make_layer(block, inPlanes,  layers[0], stride=1, norm_layer=norm_layer,geom=geom)
         self.layer2 = self._make_layer(block, inPlanes*2, layers[1], stride=strides[1], norm_layer=norm_layer,geom=geom)
         self.layer3 = self._make_layer(block, inPlanes*4, layers[2], stride=strides[2], norm_layer=norm_layer,geom=geom)
@@ -183,10 +192,10 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.conv1(x)
+        x = self.lay1(x)
         x = self.bn1(x)
-        featMaps = self.relu(x)
 
+        featMaps = self.actFunc(x)
         if self.maxpool:
             featMaps = self.maxpool(featMaps)
 
@@ -194,6 +203,9 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
+
+        if self.geom:
+            featMaps = x.clone()
 
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
