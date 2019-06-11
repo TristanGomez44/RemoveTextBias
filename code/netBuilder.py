@@ -97,11 +97,16 @@ class BoxPool(nn.Module):
 
 class GNN(nn.Module):
 
-    def __init__(self,inChan,chan,nbLay,nbOut,resCon,batchNorm,maxPoolPos,maxPoolKer):
+    def __init__(self,inChan,chan,nbLay,nbOut,resCon,batchNorm,maxPoolPos,maxPoolKer,multiChannel):
 
         super(GNN, self).__init__()
 
-        self.inLay = GeomLayer(inChan,chan,batchNorm)
+        if multiChannel:
+            layConst = GeomLayer_MC
+        else:
+            layConst = GeomLayer
+
+        self.inLay = layConst(inChan,chan,batchNorm)
         self.resCon = resCon
 
         layList = []
@@ -110,7 +115,7 @@ class GNN(nn.Module):
             if i == maxPoolPos:
                 layList.append(MaxPool2d_G((maxPoolKer,maxPoolKer)))
             else:
-                layList.append(GeomLayer(chan,chan,batchNorm))
+                layList.append(layConst(chan,chan,batchNorm))
 
         layers = nn.ModuleList(layList)
 
@@ -195,6 +200,75 @@ class GeomLayer(nn.Module):
 
         #x = F.relu(x*template)
 
+class GeomLayer_MC(nn.Module):
+
+    def __init__(self,inChan,chan,batchNorm,boxPool=True,stride=1):
+
+        super(GeomLayer_MC, self).__init__()
+
+        initVal = torch.eye(3)[:2].unsqueeze(0).unsqueeze(0).expand(chan,inChan,2,3).float()
+        noise = Variable(initVal.data.new(initVal.size()).normal_(0, 0.1))
+        #initVal[:,0,2] = 0.75
+        #initVal[:,1,2] = 0.75
+
+        self.geoParams = nn.Parameter(initVal+noise)
+        self.linComb = nn.Parameter(torch.rand(chan,inChan))
+
+        self.stride = stride
+
+        self.inChan = inChan
+        self.chan = chan
+        self.batchNorm = nn.BatchNorm2d(inChan) if batchNorm else None
+
+        if boxPool:
+            self.bxPool = BoxPool(chan)
+        else:
+            self.bxPool = None
+
+    def forward(self,x):
+
+        if not self.batchNorm is None:
+            x = self.batchNorm(x)
+
+        x = x.unsqueeze(1).expand(x.size(0),self.chan,x.size(1),x.size(2),x.size(3))
+        x = self.applyAffTrans(x,self.geoParams)
+
+        linComb = self.linComb.unsqueeze(0).unsqueeze(3).unsqueeze(4).to(x.device)
+        linComb = linComb.expand(x.size(0),self.chan,x.size(2),x.size(3),x.size(4))
+
+        x = (x*linComb).sum(dim=2)
+
+        if self.stride > 1:
+            ctr = x.size(-2)//2,x.size(-1)//2
+            win = x.size(-2)//self.stride,x.size(-1)//self.stride
+            x = x[:,:,ctr[0]-win[0]//2:ctr[0]+win[0]//2,ctr[1]-win[1]//2:ctr[1]+win[1]//2]
+
+        if not self.bxPool is None:
+            x = self.bxPool(x)
+
+        return x
+
+    def applyAffTrans(self,x,geoParams):
+
+        geoParams = geoParams.unsqueeze(0).expand(x.size(0),self.chan,self.inChan,2,3).to(x.device)
+        geoParams = geoParams.contiguous().view(x.size(0)*self.chan*self.inChan,2,3).contiguous()
+        origSize = x.size()
+        #print(x.size())
+        x = x.contiguous().view(x.size(0)*x.size(1)*x.size(2),1,x.size(3),x.size(4)).contiguous()
+        #print(x.size())
+        grid = F.affine_grid(geoParams, x.size())
+
+        #grid = torch.remainder(grid+1,2)-1
+
+        xSamp = F.grid_sample(x, grid)
+        xSamp = xSamp.view(origSize)
+
+        return xSamp
+        #template = self.template.unsqueeze(0).expand(x.size(0),self.template.size(0),self.template.size(1),self.template.size(2))
+
+        #x = F.relu(x*template)
+
+
 def netMaker(args):
     '''Build a network
     Args:
@@ -224,13 +298,19 @@ def netMaker(args):
         numClasses = 10
 
         if args.model == "cnn":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
-                                strides=[1,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,\
+                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
         elif args.model == "gnn":
             net = GNN(inChan,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
+        elif args.model == "gnn_resnet_stri":
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False)
         elif args.model == "gnn_resnet":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,maxpool=False,\
-                                strides=[1,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False)
+        elif args.model == "gnn_resnet_mc":
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=True)
 
         else:
             raise ValueError("Unknown model type : {}".format(args.model))
