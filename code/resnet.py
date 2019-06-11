@@ -28,7 +28,7 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, norm_layer=None,geom=False):
+                 base_width=64, norm_layer=None,geom=False,geomConst=None):
         super(BasicBlock, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -36,9 +36,9 @@ class BasicBlock(nn.Module):
         self.geom=geom
 
         if geom:
-            self.lay1 = netBuilder.GeomLayer(inplanes,planes,batchNorm=False,boxPool=False,stride=stride)
+            self.lay1 = geomConst(inplanes,planes,batchNorm=False,boxPool=False,stride=stride)
             self.actFunc = netBuilder.BoxPool(planes)
-            self.lay2 = netBuilder.GeomLayer(planes,planes,batchNorm=False,boxPool=False)
+            self.lay2 = geomConst(planes,planes,batchNorm=False,boxPool=False)
         else:
             self.lay1 = conv3x3(inplanes, planes, stride)
             self.actFunc = nn.ReLU(inplace=True)
@@ -70,7 +70,7 @@ class Bottleneck(nn.Module):
     expansion = 4
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
-                 base_width=64, norm_layer=None,geom=False):
+                 base_width=64, norm_layer=None,geom=False,geomConst=None):
         super(Bottleneck, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -78,7 +78,7 @@ class Bottleneck(nn.Module):
         # Both self.conv2 and self.downsample layers downsample the input when stride != 1
 
         if geom:
-            self.lay2 = netBuilder.GeomLayer(width,width,batchNorm=False,boxPool=False,stride=stride)
+            self.lay2 = geomConst(width,width,batchNorm=False,boxPool=False,stride=stride)
             self.actFunc = netBuilder.BoxPool(width)
         else:
             self.lay2 = conv3x3(width, width, stride, groups)
@@ -120,13 +120,13 @@ class Bottleneck(nn.Module):
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
-                 groups=1, width_per_group=64, norm_layer=None,geom=False,inChan=3,maxpool=True,strides=[2,2,2,2],firstConvKer=7,inPlanes=64):
+                 groups=1, width_per_group=64, norm_layer=None,geom=False,inChan=3,\
+                 strides=[2,2,2,2],firstConvKer=7,inPlanes=64,multiChan=False):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
         self.inplanes = inPlanes
-        self.maxpool = maxpool
         self.groups = groups
         self.base_width = width_per_group
 
@@ -134,9 +134,13 @@ class ResNet(nn.Module):
             raise ValueError("The kernel size of the first convolution should be an odd number")
         self.geom = geom
 
-        if geom:
+        if multiChan:
+            geomConst = netBuilder.GeomLayer_MC
+        else:
+            geomConst = netBuilder.GeomLayer
 
-            self.lay1 = netBuilder.GeomLayer(inChan,self.inplanes,batchNorm=False,boxPool=False)
+        if geom:
+            self.lay1 = geomConst(inChan,self.inplanes,batchNorm=False,boxPool=False)
             self.actFunc = netBuilder.BoxPool(self.inplanes)
             self.maxpool = netBuilder.MaxPool2d_G((3,3))
 
@@ -147,10 +151,10 @@ class ResNet(nn.Module):
 
         self.bn1 = norm_layer(self.inplanes)
 
-        self.layer1 = self._make_layer(block, inPlanes,  layers[0], stride=1, norm_layer=norm_layer,geom=geom)
-        self.layer2 = self._make_layer(block, inPlanes*2, layers[1], stride=strides[1], norm_layer=norm_layer,geom=geom)
-        self.layer3 = self._make_layer(block, inPlanes*4, layers[2], stride=strides[2], norm_layer=norm_layer,geom=geom)
-        self.layer4 = self._make_layer(block, inPlanes*8, layers[3], stride=strides[3], norm_layer=norm_layer,geom=geom)
+        self.layer1 = self._make_layer(block, inPlanes,  layers[0], stride=1, norm_layer=norm_layer,geom=geom,geomConst=geomConst)
+        self.layer2 = self._make_layer(block, inPlanes*2, layers[1], stride=strides[1], norm_layer=norm_layer,geom=geom,geomConst=geomConst)
+        self.layer3 = self._make_layer(block, inPlanes*4, layers[2], stride=strides[2], norm_layer=norm_layer,geom=geom,geomConst=geomConst)
+        self.layer4 = self._make_layer(block, inPlanes*8, layers[3], stride=strides[3], norm_layer=norm_layer,geom=geom,geomConst=geomConst)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(inPlanes*8 * block.expansion, num_classes)
 
@@ -171,7 +175,7 @@ class ResNet(nn.Module):
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)
 
-    def _make_layer(self, block, planes, blocks, stride=1, norm_layer=None,geom=False):
+    def _make_layer(self, block, planes, blocks, stride=1, norm_layer=None,geom=False,geomConst=None):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         downsample = None
@@ -183,11 +187,11 @@ class ResNet(nn.Module):
 
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample, self.groups,
-                            self.base_width, norm_layer))
+                            self.base_width, norm_layer,geom,geomConst))
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
             layers.append(block(self.inplanes, planes, groups=self.groups,
-                                base_width=self.base_width, norm_layer=norm_layer,geom=geom))
+                                base_width=self.base_width, norm_layer=norm_layer,geom=geom,geomConst=geomConst))
 
         return nn.Sequential(*layers)
 
