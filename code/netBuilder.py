@@ -299,19 +299,21 @@ def netMaker(args):
 
         if args.model == "cnn":
             net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses)
+                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,conv=True)
         elif args.model == "gnn":
             net = GNN(inChan,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
         elif args.model == "gnn_resnet_stri":
             net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False)
+                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
         elif args.model == "gnn_resnet":
             net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False)
+                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
         elif args.model == "gnn_resnet_mc":
             net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=True)
-
+                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=True,conv=False)
+        elif args.model == "gcnn_resnet":
+            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=True)
         else:
             raise ValueError("Unknown model type : {}".format(args.model))
 
