@@ -11,10 +11,6 @@ First clone this git. Then install conda and the dependencies with the following
 conda env create -f environment.yml
 ```
 
-## Data bases :
-
-The datasets will install themselves when you will want to use them.
-
 ## How does this code work ?
 
 This code is organised with seral scripts and one config file :
@@ -29,6 +25,14 @@ This code is organised with seral scripts and one config file :
 - vis.py : contains functions to visualise the feature map or to optimise the image of a dataset to maximise some activation.
 - processResults.py : will be used to further process the results but is currently empy.
 
+## Data bases :
+
+The datasets will download themselves when you will want to use them, excepts for ImageNet. To use ImageNet first instlal with the standard procedure
+(detailed on the pytorch website). The dataset you can use are MNIST, CIFAR10 and ImageNet (but you have to download it and set it up manually). You can also
+use a dataset of random noise image FAKENIST, which is useful in the vis.py script.
+
+To select a dataset, use the --dataset argument with one of the following values : 'MNIST', 'CIFAR10', 'FAKENIST' and 'IMAGENET'.
+
 ## How to train a model ?
 
 To train a CNN on MNIST during 100 epochs run the following command :
@@ -41,7 +45,7 @@ You will most likely train several models and to prevent this from becoming a me
 with the --exp_id argument and the name of the model with the --model_id argument, like this :
 
 ```
-python trainVal.py -c model.config --dataset MNIST --model cnn --epoch --model_id model_test --exp_id first_experiment
+python trainVal.py -c model.config --dataset MNIST --model cnn --epochs 100 --model_id model_test --exp_id first_experiment
 ```
 
 During the experiment, you can see that two folders 'models' and 'results' have been created at the root of the project beside the folder 'code'.
@@ -69,7 +73,7 @@ There are currently 6 models available. To choose one of them for training, you 
 - 'gnn_resnet_stri' : same as gnn_resnet but it also proposes an equivalent of stride for affine transforms by just applying a center crop on the feature map
 - 'gcnn_resnet' : a (9 layers) hybrid model between cnn and gnn_resnet_mc. It is a resnet architecture where each convolution is followed by an affine transform. The rest of the resnet is left unchanged.
 
-## What are the other argument ?
+## What are the other arguments ?
 
 The explaination for each argument is given in the args.py script but can be obtained by running :
 
@@ -77,10 +81,21 @@ The explaination for each argument is given in the args.py script but can be obt
 python trainVal.py -c model.config --help
 ```
 
+### How to keep training a model ?
+
+To use the weights of a model to initialise your model set the --start_mode arg to 'fine_tune' and set --init_path to the path of the weights you want to use.
+Let's say you have trained a model called 'firstModel' in an experiment named 'firstExp' and you want to use its weights after training epoch 44 to init your new model :
+
+```
+python trainVal.py -c model.config --exp_id newExp --model_id newModel --start_mode fine_tune --init_path ../models/firstExp/modelfirstModel_epoch44
+```
+
+The new model will therefore start training at epoch 44 and will train until the maximum number of epochs has been reached. This value is set by the argument --epochs.
+
 ## How to reproduce the experiments ?
 
-Simply run the script expe_mnist.sh to train a cnn, a gnn_resnet, a gnn_resnet_mc and a gcnn_resnet on MNIST.
-You can also run the script expe_cifar.sh to train the same architectures on CIFAR10.
+Simply run the script mnist.sh to train a cnn, a gnn_resnet, a gnn_resnet_mc and a gcnn_resnet on MNIST.
+You can also run the script cifar.sh to train the same architectures on CIFAR10.
 
 You can then visualise the results for MNIST with  :
 
