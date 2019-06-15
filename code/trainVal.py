@@ -17,6 +17,8 @@ import vis
 from torch.distributions import Bernoulli
 from tensorboardX import SummaryWriter
 
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.enabled = True
 
 from PIL import Image
 
@@ -106,7 +108,6 @@ def testDetect(model,test_loader,epoch, writer,args):
 
     #Print the results
     writeSummaries(total_loss,total_acc,batch_idx+1,writer,epoch,"val",args.model_id,args.exp_id)
-
 
 def writeSummaries(total_loss,total_acc,sampleNb,writer,epoch,mode,model_id,exp_id):
 
@@ -266,6 +267,8 @@ def main(argv=None):
 
     #The writer for tensorboardX
     writer = SummaryWriter("../results/{}".format(args.exp_id))
+
+    print("Model :",args.model_id,"Experience :",args.exp_id)
 
     #Building the net
     net = netBuilder.netMaker(args)
