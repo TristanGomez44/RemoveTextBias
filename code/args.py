@@ -89,10 +89,9 @@ class ArgReader():
                             the main process that will do the data loading when needed, num_workers equal 1 is\
                             the same as any n, but you’ll only have a single worker, so it might be slow')
 
-        self.parser.add_argument('--geom', type=str2bool,metavar='NOCUDA',
-                            help='To add geometric layers')
         self.parser.add_argument('--permutate', type=str2bool,metavar='NOCUDA',
-                            help='To generate one permutation and permutate the pixels of all images with it.')
+                            help='To generate one permutation and permutate the pixels of all images with it. Leave this\
+                                argument to False to have the image unchanged.')
         self.parser.add_argument('--write_img_ex', type=str2bool,metavar='NOCUDA',
                             help='To write some images of the dataset on the disk')
 
@@ -168,8 +167,8 @@ class ArgReader():
 
         self.parser.add_argument('--debug', type=str2bool, metavar='N',
                             help='To run only a few batch of training')
-
-
+        self.parser.add_argument('--note', type=str,metavar='NOTE',
+                            help="A note on the model. It is useful to remember something specific about a model.")
 
         self.args = None
 
