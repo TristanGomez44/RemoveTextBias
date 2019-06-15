@@ -30,56 +30,6 @@ from args import ArgReader
 
 import random
 
-#Look for the most important pixels in the activation value using mask
-def salMap_mask(image,model,imgInd, maskSize=(1,1)):
-    print("Computing saliency map using mask")
-    pred,_ = model(image)
-
-    argMaxpred = np.argmax(pred[0].detach().numpy())
-
-    salMap = np.zeros((image.size()[2],image.size()[3]))
-
-    for i in range(int(image.size()[2]/maskSize[0])):
-        for j in range(int(image.size()[3]/maskSize[1])):
-
-            maskedImage = torch.tensor(image)
-
-
-            xPosS = i*maskSize[0]
-            yPosS = j*maskSize[1]
-
-            xPosE = min(image.size()[2],xPosS+maskSize[0])
-            yPosE = min(image.size()[3],yPosS+maskSize[1])
-
-            """
-            print("------ New mask ------")
-            print(maskedImage[0][0][xPosS:xPosE])
-            print(yPosS)
-            print(maskedImage[0][0][xPosS:xPosE,yPosS])
-            """
-            maskedImage[0][0][xPosS:xPosE,yPosS:yPosE] = image.min()
-            maskedPred,_ = model(maskedImage)
-
-            err = torch.pow((pred[0][argMaxpred] - maskedPred[0][argMaxpred]),2)
-            salMap[xPosS:xPosE,yPosS:yPosE] = err.detach().numpy()
-
-    writeImg("../vis/salMapMask_img_{}_u{}.png".format(imgInd,argMaxpred),salMap)
-
-#Look for the most important pixels in the activation value using derivative
-def salMap_der(image,model,imgInd):
-    print("Computing saliency map using derivative")
-    pred,_ = model(image)
-
-    argMaxpred = np.argmax(pred.detach().numpy())
-
-    loss = - pred[0][argMaxpred]
-
-    loss.backward()
-
-    salMap = image.grad/image.grad.sum()
-
-    writeImg("../vis/salMapDer_img_{}_u{}.png".format(imgInd,argMaxpred),salMap.numpy()[0,0])
-
 def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alpha=6, beta=2,
         C=20, B=2, stopThre = 0.000005,lr=0.001,momentum=0.9,optimType="SGD",layToOpti="conv",reg_weight=0):
     print("Maximizing activation")
@@ -188,7 +138,7 @@ def main(argv=None):
                         help='To visualise the last feature map of a model. \
                         The values are :\
                             the path to the model, \
-                            the number of image to be created')
+                            the number of input image to be pass through the net')
 
     argreader.parser.add_argument('--stop_thres', type=float, default=0.000005,metavar='NOISE',
                         help='If the distance travelled by parameters during activation maximisation become lesser than this parameter, the optimisation stops.')
