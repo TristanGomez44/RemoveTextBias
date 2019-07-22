@@ -122,6 +122,11 @@ class ArgReader():
                             help='the number of cluster to do')
         self.parser.add_argument('--dataset', type=str, metavar='N',
                             help='the dataset to use')
+        self.parser.add_argument('--crop_size_imagenet', type=int, metavar='N',
+                            help='The size at which to crop the images for the imagenet dataset.\
+                                  Ignored if another dataset is used.')
+        self.parser.add_argument('--train_prop', type=float, metavar='N',
+                            help='The dataset proportion to use for training.')
 
         self.parser.add_argument('--model', type=str, metavar='N',
                             help='The model type to use. Can be \'cnn\' or \'gnn\'')
