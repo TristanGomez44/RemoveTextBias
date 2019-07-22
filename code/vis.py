@@ -24,7 +24,7 @@ from torchvision import datasets, transforms
 from torch.autograd import Variable
 import netBuilder
 from skimage.transform import resize
-from matplotlib.mlab import PCA
+
 import dataLoader
 from args import ArgReader
 
@@ -48,8 +48,8 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
     last_img = np.copy(image.detach().numpy())
 
     while i<epoch and lastVar >= stopThre:
-
     #for i in range(1, epoch+1):
+
         optimizer.zero_grad()
         output,actArr = model(image)
 
@@ -97,7 +97,6 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
         lastVar = np.sqrt(np.power(last_img - np_img,2).sum())
         last_img = np.copy(image.detach().numpy())
 
-
         if i % nbPrint == 0:
             # Save image
             print('Iteration:', str(i), 'Loss:', loss.data.numpy(),"Travelled distance",lastVar)
@@ -108,9 +107,8 @@ def opt(image,model,exp_id,model_id,imgInd, unitInd, epoch=1000, nbPrint=20, alp
 
     writeImg('../vis/{}/img{}_model{}_'.format(exp_id,imgInd,model_id)+'_u' + str(unitInd) + '_iter'+str(i)+'.jpg',image.detach().numpy()[0,:])
 
-def writeImg(path,img):
-    print(img.shape)
-    np_img = resize(img,(img.shape[0],300,300),mode="constant", order=0,anti_aliasing=True)
+def writeImg(path,img,size=(300,300)):
+    np_img = resize(img,(img.shape[0],size[0],size[1]),mode="constant", order=0,anti_aliasing=True)
 
     np_img = (np_img-np_img.min())/(np_img.max()-np_img.min())
     np_img = (255*np_img).astype('int')
@@ -119,6 +117,24 @@ def writeImg(path,img):
         np_img = np.transpose(np_img, (1, 2, 0))
 
     cv2.imwrite(path,np_img)
+
+def getMostImportantFeatMapsInd(model,exp_id,model_id):
+    absWei = torch.abs(model.fc.weight.data).cpu().numpy()
+    print(absWei.shape)
+    sortedMapInds = (-absWei.sum(axis=0)).argsort()
+    absWei = absWei[:,sortedMapInds]
+
+    for i in range(len(absWei)):
+        if i == 0:
+            bottom = 0
+        else:
+            bottom = absWei[:i].sum(axis=0)
+
+        p2 = plt.bar(np.arange(absWei.shape[1]), absWei[i], width=1,bottom=bottom)
+
+    plt.savefig("../vis/{}/model{}_weight_hist.png".format(exp_id,model_id))
+
+    return sortedMapInds
 
 def main(argv=None):
 
@@ -130,15 +146,9 @@ def main(argv=None):
                         help='To visualise an image that maximise the activation of one unit in the last layer. \
                         The values are :\
                             the path to the model, \
-                            the number of image to be created, \
+                            the number of images to be created, \
                             the layer to optimise. Can be \'conv\' or \'dense\' \
                             the unit to optimise. If not indicated, the unit number i will be optimised if image has label number i.')
-
-    argreader.parser.add_argument('--plot_feat_map', type=str,nargs='*', metavar='VAL',
-                        help='To visualise the last feature map of a model. \
-                        The values are :\
-                            the path to the model, \
-                            the number of input image to be pass through the net')
 
     argreader.parser.add_argument('--stop_thres', type=float, default=0.000005,metavar='NOISE',
                         help='If the distance travelled by parameters during activation maximisation become lesser than this parameter, the optimisation stops.')
@@ -146,6 +156,11 @@ def main(argv=None):
     argreader.parser.add_argument('--reg_weight', type=float, default=0,metavar='NOISE',
                         help='The weight of the regularisation during activation maximisation.')
 
+    argreader.parser.add_argument('--plot_feat_map', type=str,nargs='*', metavar='VAL',
+                        help='To visualise the last feature map of a model. \
+                        The values are the path to the model weights,  the number of input image to be pass through \
+                        the net and the number of final feature map to plot. \
+                        The --exp_id, --model_id and --model must be set.')
 
     #Reading the comand line arg
     argreader.getRemainingArgs()
@@ -163,7 +178,6 @@ def main(argv=None):
         modelPath = args.max_act[0]
         nbImages = int(args.max_act[1])
         layToOpti = args.max_act[2]
-
 
         random.seed(args.seed)
 
@@ -202,6 +216,8 @@ def main(argv=None):
 
         modelPath = args.plot_feat_map[0]
         nbImages = int(args.plot_feat_map[1])
+        nbFeatMaps = int(args.plot_feat_map[2])
+        margin = 2
 
         #Building the net
         model = netBuilder.netMaker(args)
@@ -214,21 +230,41 @@ def main(argv=None):
 
         model.eval()
 
-        for i,(image,label) in enumerate(test_loader):
+        bigImg = None
 
-            print("Image ",i)
+        totalW = 0
+        totalH = 0
 
-            img = Variable(test_loader.dataset[i][0]).unsqueeze(0)
+        sortedMapInds = getMostImportantFeatMapsInd(model,args.exp_id,args.model_id)
 
-            writeImg('../vis/{}/img_'.format(args.exp_id)+str(i)+'.jpg',image[0].detach().numpy())
+        imgLabelList = [test_loader.dataset[i]  for i in range(nbImages)]
+        imgList,_ =zip(*sorted(imgLabelList,key=lambda x:x[1]))
 
-            _,featMaps = model(img)
+        for i in range(nbImages):
 
-            for j in range(len(featMaps[0])):
+            img = imgList[i]
+            inSize = img.shape[1],img.shape[2]
+            if bigImg is None:
+                bigImg = np.zeros((nbImages*(img.shape[1]+margin),(nbFeatMaps+1)*(img.shape[2]+margin)))
 
-                writeImg('../vis/{}/model_{}_img{}_map{}_.jpg'.format(args.exp_id,args.model_id,i,j),featMaps[0,j].detach().unsqueeze(0).numpy())
+            bigImg[i*(img.shape[1]+margin):(i+1)*img.shape[1]+i*margin,:img.shape[2]] = img.squeeze()
 
-            if i == nbImages-1:
-                break
+            _,featMaps = model(img.unsqueeze(0))
+
+            #Taking only the most important feature map
+            print(featMaps.shape)
+            featMaps = featMaps[0,sortedMapInds]
+
+            for j in range(1,min(11,len(featMaps[0]+1))):
+
+                img = featMaps[j].detach().numpy()
+                img = resize(img,inSize,mode="constant", order=0,anti_aliasing=True)
+
+                bigImg[i*(img.shape[0]+margin):(i+1)*img.shape[0]+i*margin,j*(img.shape[1]+margin):(j+1)*(img.shape[1])+j*margin] = img
+
+                totalW += img.shape[0]+margin
+
+        writeImg('../vis/{}/model_{}.png'.format(args.exp_id,args.model_id),bigImg[np.newaxis],size=(300*nbImages,300*min(11,len(featMaps[0]+1))))
+
 if __name__ == "__main__":
     main()
