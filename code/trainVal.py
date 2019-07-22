@@ -18,7 +18,8 @@ from torch.distributions import Bernoulli
 from tensorboardX import SummaryWriter
 
 torch.backends.cudnn.benchmark = True
-torch.backends.cudnn.enabled = True
+torch.backends.cudnn.enabled = False
+
 
 from PIL import Image
 
@@ -59,7 +60,7 @@ def trainDetect(model,optimizer,train_loader, epoch, writer,args):
         loss = F.cross_entropy(output, target)
         loss.backward()
 
-        total_loss += loss.data.item()
+        total_loss += loss.data.data.item()
 
         optimizer.step()
 
@@ -237,7 +238,7 @@ def main(argv=None):
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
-    train_loader,test_loader,perm = dataLoader.loadData(args.dataset,args.batch_size,args.test_batch_size,args.permutate,args.cuda,args.num_workers)
+    train_loader,test_loader,perm = dataLoader.loadData(args.dataset,args.batch_size,args.test_batch_size,args.permutate,args.cuda,args.num_workers,args.crop_size_imagenet,args.train_prop)
 
     if args.write_img_ex:
 
@@ -304,7 +305,8 @@ def main(argv=None):
                 lrCounter += 1
 
         trainDetect(net,optimizer,train_loader,epoch, writer,args)
-        testDetect(net,test_loader,epoch, writer,args)
+        with torch.no_grad():
+            testDetect(net,test_loader,epoch, writer,args)
 
 if __name__ == "__main__":
     main()
