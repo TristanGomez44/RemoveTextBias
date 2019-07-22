@@ -27,7 +27,7 @@ class MaxPool2d_G(nn.Module):
 
         #Compute the mean activation in every rectangle of size convKerSize with a convolution
         weight = (torch.ones((convKerSize)).unsqueeze(0).unsqueeze(0).expand(x.size(1),1,convKerSize[0],convKerSize[1])/(convKerSize[0]+convKerSize[1])).to(x.device)
-        x_conv = torch.nn.functional.conv1d(x, weight,padding=(convKerSize[0]//2,convKerSize[1]//2),groups=x.size(1))[:,:,:x.size(-2),:x.size(-1)]
+        x_conv = torch.nn.functional.conv2d(x, weight,padding=(convKerSize[0]//2,convKerSize[1]//2),groups=x.size(1))[:,:,:x.size(-2),:x.size(-1)]
 
         #Get the position of the maxima for each feature map of each batch
         origImgSize = x.size(-2),x.size(-1)
@@ -277,48 +277,40 @@ def netMaker(args):
         the built network
     '''
 
-    if args.dataset == "IMAGENET":
-        net = resnet.resnet18(pretrained=False,geom=args.geom)
-
-        stateDict = torch.load("../nets/resnet18_imageNet.pth")
-
-        for key in stateDict.keys():
-            if not key.endswith("conv2.weight") or (not args.geom):
-                net.state_dict()[key].data += stateDict[key].data - net.state_dict()[key].data
-
-    elif args.dataset == "MNIST" or args.dataset == "FAKENIST" or args.dataset == "CIFAR10":
-
-        if args.dataset == "MNIST" or args.dataset == "FAKENIST":
-            inSize = 28
-            inChan = 1
-        else:
-            inSize = 32
-            inChan = 3
-
+    if args.dataset == "MNIST" or args.dataset == "FAKENIST":
+        inSize = 28
+        inChan = 1
         numClasses = 10
-
-        if args.model == "cnn":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,conv=True)
-        elif args.model == "gnn":
-            net = GNN(inChan,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker)
-        elif args.model == "gnn_resnet_stri":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
-        elif args.model == "gnn_resnet":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
-        elif args.model == "gnn_resnet_mc":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=True,conv=False)
-        elif args.model == "gcnn_resnet":
-            net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
-                                strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=True)
-        else:
-            raise ValueError("Unknown model type : {}".format(args.model))
-
+    elif args.dataset == "CIFAR10":
+        inSize = 32
+        inChan = 3
+        numClasses = 10
+    elif args.dataset == "IMAGENET":
+        inSize = 224
+        inChan = 3
+        numClasses = 1000
     else:
         raise ValueError("Unknown dataset : {}".format(args.dataset))
+
+    if args.model == "cnn":
+        net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=False,inChan=inChan, width_per_group=args.dechan,\
+                            strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,conv=True)
+    elif args.model == "gnn":
+        net = GNN(inChan,args.chan_gnn,args.nb_lay_gnn,numClasses,args.res_con_gnn,args.batch_norm_gnn,args.max_pool_pos,args.max_pool_ker,False)
+    elif args.model == "gnn_resnet_stri":
+        net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                            strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
+    elif args.model == "gnn_resnet":
+        net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                            strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=False)
+    elif args.model == "gnn_resnet_mc":
+        net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                            strides=[1,1,1,1],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=True,conv=False)
+    elif args.model == "gcnn_resnet":
+        net = resnet.ResNet(resnet.BasicBlock, [1, 1, 1, 1],geom=True,inChan=inChan, width_per_group=args.dechan,\
+                            strides=[2,2,2,2],firstConvKer=args.deker,inPlanes=args.dechan,num_classes=numClasses,multiChan=False,conv=True)
+    else:
+        raise ValueError("Unknown model type : {}".format(args.model))
 
     return net
 
