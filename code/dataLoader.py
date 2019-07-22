@@ -1,10 +1,15 @@
 import  torch.utils.data
+from torch.utils.data.sampler import SubsetRandomSampler
+
 from torchvision import datasets, transforms
 import os
 from skimage import feature
 import numpy as np
 
-def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers=1):
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers=1,cropSize=150,trainProp=1):
     ''' Build two dataloader
 
     Args:
@@ -23,7 +28,7 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
 
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if cuda else {}
 
-    dataDict = {"MNIST":(28*28,1),"FAKENIST":(28*28,1),"CIFAR10":(32*32,3),"IMAGENET":(224*224,3)}
+    dataDict = {"MNIST":(28*28,1),"FAKENIST":(28*28,1),"CIFAR10":(32*32,3),"IMAGENET":(cropSize*cropSize,3)}
 
     if permutate:
         permInd = np.arange(dataDict[dataset][0]*dataDict[dataset][1])
@@ -41,17 +46,23 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
 
     if dataset == "MNIST":
 
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST('../data/MNIST', train=True, download=True, transform=transforms.Compose([
-                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
-            batch_size=batch_size, shuffle=True, **kwargs)
+        trainDataset = datasets.MNIST('../data/MNIST', train=True, download=True, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm]))
+
+        subset_indices = torch.arange(int(len(trainDataset)*trainProp))
+
+        train_loader = torch.utils.data.DataLoader(trainDataset,batch_size=batch_size,sampler=SubsetRandomSampler(subset_indices), **kwargs)
         test_loader = torch.utils.data.DataLoader(datasets.MNIST('../data/MNIST', train=False, transform=transforms.Compose([
                                transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
             batch_size=test_batch_size, shuffle=False, **kwargs)
 
     elif dataset == "CIFAR10":
-        train_loader = torch.utils.data.DataLoader(datasets.CIFAR10('../data/', train=True, download=True, transform=transforms.Compose([
-                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
-            batch_size=batch_size, shuffle=True, **kwargs)
+
+        trainDataset = datasets.CIFAR10('../data/', train=True, download=True, transform=transforms.Compose([
+                               transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm]))
+        subset_indices = torch.arange(int(len(trainDataset)*trainProp))
+
+        train_loader = torch.utils.data.DataLoader(trainDataset,batch_size=batch_size,sampler=SubsetRandomSampler(subset_indices), **kwargs)
         test_loader = torch.utils.data.DataLoader(datasets.CIFAR10('../data/', train=False, transform=transforms.Compose([
                                transforms.ToTensor(),transforms.Normalize((0.1307,), (0.3081,)),perm])),
             batch_size=test_batch_size, shuffle=False, **kwargs)
@@ -70,7 +81,7 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
 
-        train_dataset = datasets.ImageFolder(traindir,transforms.Compose([transforms.RandomResizedCrop(224),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,perm]))
+        train_dataset = datasets.ImageFolder(traindir,transforms.Compose([transforms.RandomResizedCrop(cropSize),transforms.RandomHorizontalFlip(),transforms.ToTensor(),normalize,perm]))
 
         train_sampler = None
 
@@ -78,7 +89,7 @@ def loadData(dataset,batch_size,test_batch_size,permutate,cuda=False,num_workers
             train_dataset, batch_size=batch_size, shuffle=(train_sampler is None),
             num_workers=kwargs["num_workers"], pin_memory=True, sampler=train_sampler)
 
-        test_loader = torch.utils.data.DataLoader(datasets.ImageFolder(valdir, transforms.Compose([transforms.Resize(256),transforms.CenterCrop(224),transforms.ToTensor(),normalize,perm])),
+        test_loader = torch.utils.data.DataLoader(datasets.ImageFolder(valdir, transforms.Compose([transforms.Resize(256),transforms.CenterCrop(cropSize),transforms.ToTensor(),normalize,perm])),
             batch_size=test_batch_size, shuffle=False,
             num_workers=kwargs["num_workers"], pin_memory=True)
 
