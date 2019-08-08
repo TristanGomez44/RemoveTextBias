@@ -127,7 +127,7 @@ The new model will therefore start training at epoch 44 and will train until the
 
 ## How to reproduce the experiments ?
 
-Simply run the script mnist.sh to train a cnn, a gnn and a gcnn_resnet on MNIST.
+Simply run the script mnist.sh to train a cnn, a gnn and a gcnn on MNIST.
 You can also run the script cifar.sh to train the same models on CIFAR10.
 
 You can then visualise the results for MNIST with  :
