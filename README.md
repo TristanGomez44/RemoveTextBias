@@ -3,6 +3,39 @@
 This repo contains python scripts to train and evaluate several model to classify images. The aim is to find model that are biased
 towards shape and not texture (as are CNNs).
 
+## The proposals
+
+I propose an architecture called Geometrical neural network (GNN). This is a ResNet except that the following things are replaced :
+
+- the convolution in CNN by a learned affine transformation.
+- the max-pooling operation by an operation that find the maximumly activated region in a feature map and crop it to keep only this region (Region max-pooling (RMP)).
+- the ReLU activation by an operation that set to zero every pixels that are not located in a specific area of the image.
+
+Otherwise these are unchanged :
+- Layers : Channels read the output of preceding channels
+- Channel : each channel apply a transformation to each preceding channel and aggregates their results to one feature map with a (learned) ponderated sum.
+- An average pooling is applied to the final feature map, as is done in a ResNet.
+
+Let's compare it to the following architectures :
+
+- CNN : a normal ResNet
+- GCNN : a normal ResNet except each convolution is followed by an affine transformation.
+
+## Results
+
+Here are the results of training those three architectures on MNIST and CIFAR10. In both case we can see that *the GNN performs notably worse* than the two other. However, *it does not overfit at all* (the validation accuracy is superior to training accuracy), as opposed to the models that contains convolution, which are both clearly overfitting.
+
+<figure>
+  <img src="pics/acc_mnist.png"  width="550" height="350">
+ <figcaption>Accuracy evolution during training on MNIST.</figcaption>
+</figure>
+
+<figure>
+  <img src="pics/acc_cifar10.png"  width="550" height="350">
+ <figcaption>Accuracy evolution during training on CIFAR10.</figcaption>
+</figure>
+
+
 ## Instalation
 
 First clone this git. Then install conda and the dependencies with the following command :
@@ -94,8 +127,8 @@ The new model will therefore start training at epoch 44 and will train until the
 
 ## How to reproduce the experiments ?
 
-Simply run the script mnist.sh to train a cnn, a gnn_resnet, a gnn_resnet_mc and a gcnn_resnet on MNIST.
-You can also run the script cifar.sh to train the same architectures on CIFAR10.
+Simply run the script mnist.sh to train a cnn, a gnn and a gcnn_resnet on MNIST.
+You can also run the script cifar.sh to train the same models on CIFAR10.
 
 You can then visualise the results for MNIST with  :
 
